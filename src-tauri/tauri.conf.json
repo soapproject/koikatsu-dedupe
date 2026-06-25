@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "卡片去重",
+        "title": "Koikatsu Dedupe",
         "width": 1180,
         "height": 840,
         "resizable": true,

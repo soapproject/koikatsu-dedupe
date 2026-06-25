@@ -71,10 +71,10 @@ async fn card_strings(path: String) -> Vec<String> {
 async fn copy_to_game(src: String, dest_dir: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let src = PathBuf::from(&src);
-        let name = src.file_name().ok_or_else(|| "來源路徑無檔名".to_string())?;
+        let name = src.file_name().ok_or_else(|| "src_no_name".to_string())?;
         let dest = PathBuf::from(&dest_dir);
         if !dest.is_dir() {
-            return Err(format!("遊戲 chara 路徑不存在或不是資料夾：{}", dest.display()));
+            return Err(format!("game_path_invalid|{}", dest.display()));
         }
         let to = dest.join(name);
         std::fs::copy(&src, &to).map_err(|e| format!("{} → {}：{}", src.display(), to.display(), e))?;

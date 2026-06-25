@@ -498,7 +498,7 @@ async function copyCard(f,btn){
     if(wrap && !wrap.querySelector('.copied')){
       const b=document.createElement('div'); b.className='copied'; b.textContent=t('review.copied'); wrap.appendChild(b);
     }
-  }catch(e){ toast(t('toast.copy_fail',{e}), true); }
+  }catch(e){ toast(t('toast.copy_fail',{e:mapErr(e)}), true); }
 }
 
 // ---------- 詳細資料：逐行比對表 ----------
@@ -623,6 +623,12 @@ document.getElementById('btnDelete').onclick=()=>{
   // ponytail: GUI 模型不需 move/_duplicated/restore — 刪選中的（→回收桶），未選的本就沒動
   setTimeout(()=>{show('setup');},1400);
 };
+function mapErr(e){
+  const s=String(e&&e.message||e);
+  if(s==='src_no_name') return t('err.src_no_name');
+  if(s.startsWith('game_path_invalid|')) return t('err.game_path_invalid',{path:s.slice('game_path_invalid|'.length)});
+  return s;
+}
 function toast(msg,sticky){            // sticky=true：紅底、不自動消失，點一下才關（用於錯誤）
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
   clearTimeout(t._t); t.classList.toggle('err',!!sticky);
