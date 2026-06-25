@@ -222,7 +222,13 @@ fn scan(conn: &mut Connection, root: &Path, on: &mut dyn FnMut(Progress)) -> rus
     Ok((new, pruned))
 }
 
-/// run a hashing tier: collect candidate paths, hash each, report progress.
+/// Commit roughly this often so a kill mid-tier loses at most ~this much work.
+/// The candidate SELECT filters on hash IS NULL, so committed files are skipped
+/// on the next run — that's what makes a long sync resumable.
+const COMMIT_SECS: u64 = 10;
+
+/// run a hashing tier: collect candidate paths, hash each, report progress,
+/// committing every COMMIT_SECS so progress survives a close mid-tier.
 fn run_tier(
     conn: &mut Connection,
     select_sql: &str,
@@ -241,21 +247,29 @@ fn run_tier(
     if total == 0 {
         return Ok(());
     }
-    let tx = conn.transaction()?;
-    {
-        let mut upd = tx.prepare(update_sql)?;
-        let mut last = Instant::now();
-        for (i, path) in todo.iter().enumerate() {
-            if let Some(h) = hash(Path::new(path)) {
-                upd.execute(params![h, path])?;
-            }
-            if last.elapsed().as_millis() >= 150 {
-                on(Progress { phase: phase.into(), done: (i + 1) as u64, total });
-                last = Instant::now();
+    let mut i = 0usize;
+    let mut last_progress = Instant::now();
+    while i < todo.len() {
+        let tx = conn.transaction()?;
+        {
+            let mut upd = tx.prepare(update_sql)?;
+            let batch_start = Instant::now();
+            loop {
+                if let Some(h) = hash(Path::new(&todo[i])) {
+                    upd.execute(params![h, &todo[i]])?;
+                }
+                i += 1;
+                if last_progress.elapsed().as_millis() >= 150 {
+                    on(Progress { phase: phase.into(), done: i as u64, total });
+                    last_progress = Instant::now();
+                }
+                if i >= todo.len() || batch_start.elapsed().as_secs() >= COMMIT_SECS {
+                    break;
+                }
             }
         }
+        tx.commit()?; // durable checkpoint
     }
-    tx.commit()?;
     on(Progress { phase: phase.into(), done: total, total });
     Ok(())
 }
