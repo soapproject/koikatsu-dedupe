@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卡片去重 GUI — 概念</title>
+<style>
+  :root{
+    --bg:#15171c; --panel:#1d2027; --panel2:#242833; --line:#2f3441;
+    --txt:#e6e8ee; --dim:#8b93a7; --accent:#5b8cff; --accent2:#3a5fd0;
+    --good:#37c06a; --warn:#ffb454; --danger:#ff5c6c; --hl:#ffd23f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 "Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--txt)}
+  header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  .stepper{display:flex;gap:6px;margin-left:auto;font-size:13px}
+  .stepper span{padding:4px 10px;border-radius:20px;color:var(--dim);background:var(--panel2)}
+  .stepper span.on{color:#fff;background:var(--accent)}
+  main{max-width:1100px;margin:0 auto;padding:24px 20px 80px}
+  .view{display:none}
+  .view.on{display:block}
+  h2{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--dim);margin:0 0 20px}
+  button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:10px 18px;background:var(--accent);color:#fff}
+  button:hover{background:var(--accent2)}
+  button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  button.ghost:hover{background:#2c313d}
+  button.danger{background:var(--danger)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .card-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+
+  /* path config */
+  .cfg-row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .cfg-row label{width:96px;color:var(--dim);flex:none}
+  .cfg-row input{flex:1;font-family:Consolas,monospace;font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#12141a;color:var(--txt)}
+  .cfg-status{font-size:12px;margin:-2px 0 6px 106px}
+  .cfg-status.ok{color:var(--good)} .cfg-status.bad{color:var(--danger)}
+  .recent{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px 106px;align-items:center}
+  .recent .lbl{font-size:12px;color:var(--dim)}
+  .recent .chip{font-size:12px;padding:3px 9px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);cursor:pointer;font-family:Consolas,monospace}
+  .recent .chip:hover{color:var(--txt);border-color:var(--accent)}
+  .cfg-hint{font-size:12px;color:var(--dim);margin-top:10px}
+  .cfg-row .radio{display:flex;align-items:center;gap:6px;width:auto;flex:none;color:var(--txt);cursor:pointer;font-size:14px}
+  .cfg-row .radio input{flex:none;width:auto;margin:0;accent-color:var(--accent)}
+  .cfg-hint code{background:#12141a;padding:2px 6px;border-radius:5px;color:var(--accent)}
+
+  /* sync */
+  .bar{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:14px 0 8px}
+  .bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#7aa2ff);transition:width .2s}
+  .log{font-family:Consolas,monospace;font-size:13px;color:var(--dim);background:#12141a;border:1px solid var(--line);border-radius:8px;padding:12px;height:200px;overflow:auto;white-space:pre-wrap}
+  .phase-tag{display:inline-block;font-size:12px;color:var(--accent);margin-bottom:6px}
+
+  /* setup */
+  .opt-row{display:flex;gap:12px;margin:8px 0 18px;flex-wrap:wrap}
+  .mode{flex:1;min-width:240px;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--panel2);cursor:pointer}
+  .mode.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .mode b{display:block;margin-bottom:4px}
+  .mode small{color:var(--dim)}
+  .num{display:flex;align-items:center;gap:10px;margin:14px 0}
+  .num input{width:90px;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:#12141a;color:var(--txt)}
+
+  /* review */
+  .review-top{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+  .grpcount{font-weight:600}
+  .minibar{flex:1;height:6px;background:var(--panel2);border-radius:4px;overflow:hidden}
+  .minibar > i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+  .badge{font-size:12px;padding:3px 9px;border-radius:20px;background:var(--panel2);color:var(--dim)}
+  .badge.adv{background:#3a2a52;color:#caa9ff}
+  .grid{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0 20px}
+  .pic{width:230px;background:var(--panel2);border:2px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .08s}
+  .pic:hover{transform:translateY(-2px)}
+  .pic.sel{border-color:var(--hl);box-shadow:0 0 0 2px var(--hl) inset}
+  .pic .imgwrap{position:relative;background:#0d0f14}
+  .pic img{display:block;width:100%;height:auto}
+  .pic .check{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:var(--hl);color:#222;display:none;align-items:center;justify-content:center;font-weight:700}
+  .pic.sel .check{display:flex}
+  .pic .key{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:6px;background:#000a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px}
+  .pic .meta{padding:8px 10px;font-size:12px}
+  .pic .meta .fn{word-break:break-all;color:var(--txt)}
+  .pic .meta .sz{color:var(--dim);margin-top:2px}
+  .hint{color:var(--dim);font-size:13px;margin:6px 0 18px}
+  .footer-bar{display:flex;gap:12px;align-items:center;margin-top:8px}
+  .footer-bar .spacer{flex:1}
+
+  /* summary */
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500}
+  td.sz{color:var(--dim);white-space:nowrap}
+  .total{margin:16px 0;font-size:15px}
+  .total b{color:var(--warn)}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--good);color:#06210f;padding:12px 22px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>🃏 卡片去重</h1>
+  <div class="stepper">
+    <span data-step="1" class="on">1 Sync</span>
+    <span data-step="2">2 設定</span>
+    <span data-step="3">3 比對</span>
+    <span data-step="4">4 刪除</span>
+  </div>
+</header>
+
+<main>
+  <!-- ============ 1. SYNC ============ -->
+  <section id="v-sync" class="view on">
+    <h2>同步卡池</h2>
+    <p class="sub">掃描 → 雜湊 → 清理消失的卡。只處理變動，不整池重算。</p>
+    <div class="card-panel" style="margin-bottom:16px">
+      <div class="cfg-row">
+        <label>卡片資料夾</label>
+        <input id="cfgRoot" value="./testdata" spellcheck="false">
+        <button class="ghost" id="btnBrowseRoot">瀏覽…</button>
+      </div>
+      <div class="cfg-status ok" id="rootStatus">✓ 資料夾存在 · 7 個 png（mock）</div>
+      <div class="recent" id="recentRow"></div>
+      <div class="cfg-row">
+        <label>資料庫檔</label>
+        <input id="cfgDb" value="./dedupe.sqlite" spellcheck="false">
+        <button class="ghost" id="btnBrowseDb">瀏覽…</button>
+      </div>
+      <div class="cfg-row">
+        <label>比對模式</label>
+        <label class="radio"><input type="radio" name="mode" value="byte" checked> 位元精確</label>
+        <label class="radio"><input type="radio" name="mode" value="char"> 進階·角色資料（無視卡面）</label>
+      </div>
+      <div class="cfg-row">
+        <label>完整掃描</label>
+        <label class="radio"><input type="checkbox" id="fullScan"> 重建整表（清空後重算，忽略既有雜湊）</label>
+      </div>
+      <div class="cfg-hint">重複會搬進 <code id="cfgDup">./testdata/_duplicated/</code> 供複檢 · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
+    </div>
+    <div class="card-panel">
+      <div class="phase-tag" id="syncPhase">待命</div>
+      <div class="bar"><i id="syncBar"></i></div>
+      <div class="log" id="syncLog">按「開始同步」啟動…</div>
+      <div style="margin-top:16px;display:flex;gap:12px">
+        <button id="btnSync">開始同步</button>
+        <button class="ghost" id="btnSyncSkip" disabled>進入處理 →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. SETUP ============ -->
+  <section id="v-setup" class="view">
+    <h2>處理設定</h2>
+    <p class="sub">選擇比對模式與這一批要處理的組數。</p>
+    <div class="card-panel">
+      <div class="opt-row">
+        <div class="mode sel" data-mode="byte">
+          <b>位元組精確比對</b>
+          <small>完全相同的檔案（同一張卡的副本）。組內每張一模一樣，留一即可。</small>
+        </div>
+        <div class="mode" data-mode="char">
+          <b>進階：角色資料比對 <span class="badge adv">無視卡面</span></b>
+          <small>只雜湊 PNG 內嵌的 Koikatsu 角色資料，忽略卡面圖。可揪出「同角色、不同卡面」的重複。</small>
+        </div>
+      </div>
+      <div class="num">
+        <label>這批處理組數</label>
+        <input id="batchN" type="number" value="20" min="1" max="500">
+        <span class="sub" style="margin:0" id="availTxt">／ 可用 14,293 組</span>
+      </div>
+      <div style="display:flex;gap:12px">
+        <button class="ghost" id="btnBackSync">← 回同步（換資料夾）</button>
+        <button id="btnStart">開始處理 →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. REVIEW ============ -->
+  <section id="v-review" class="view">
+    <div class="review-top">
+      <span class="grpcount" id="grpCount">組 1 / 20</span>
+      <div class="minibar"><i id="grpBar"></i></div>
+      <span class="badge" id="modeBadge">位元組精確</span>
+    </div>
+    <h2 id="grpTitle">同一組重複</h2>
+    <p class="hint" id="grpHint">點選要<b style="color:var(--hl)">刪除</b>的卡（可多選，高亮＝已選）。未選的會保留。數字鍵 1–9 快速切換，Enter 下一組。</p>
+    <div class="grid" id="grpGrid"></div>
+    <div class="footer-bar">
+      <button class="ghost" id="btnSelOthers">選取「除第一張外」全部</button>
+      <span class="sub" style="margin:0" id="selInfo">已選 0 張</span>
+      <span class="spacer"></span>
+      <button id="btnNext">下一組 →</button>
+    </div>
+  </section>
+
+  <!-- ============ 4. SUMMARY ============ -->
+  <section id="v-summary" class="view">
+    <h2>確認刪除</h2>
+    <p class="sub">以下是這一批你標記要刪除的卡。</p>
+    <div class="card-panel">
+      <div class="total">共 <b id="sumCount">0</b> 張，可釋出約 <b id="sumSize">0 MB</b></div>
+      <div style="max-height:340px;overflow:auto">
+        <table><thead><tr><th>組</th><th>檔名</th><th>大小</th></tr></thead>
+        <tbody id="sumRows"></tbody></table>
+      </div>
+      <div style="margin-top:18px;display:flex;gap:12px">
+        <button class="danger" id="btnDelete">刪除這些卡</button>
+        <button class="ghost" id="btnBackReview">← 回去再看</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- mock 卡片圖（內嵌 SVG，file:// 預覽用） ----------
+const NAMES=['さくら','ひな','あおい','ゆき','もも','れい','かな','みく','りん','ちな'];
+function cardSVG(seed,name){
+  const h=(seed*53)%360, h2=(h+45)%360, pose=seed%3;
+  const arm = pose===0?'M70 200 q-26 30 -10 70':pose===1?'M70 200 q30 24 26 64':'M70 196 q0 40 -18 70';
+  const svg=`<svg xmlns='http://www.w3.org/2000/svg' width='252' height='352'>
+    <defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0' stop-color='hsl(${h},55%,46%)'/><stop offset='1' stop-color='hsl(${h2},60%,30%)'/></linearGradient></defs>
+    <rect width='252' height='352' fill='url(#g)'/>
+    <circle cx='126' cy='120' r='52' fill='hsl(${h},30%,90%)'/>
+    <path d='M86 96 q40 -46 80 0 q6 30 -8 50 q-32 26 -64 0 q-14 -22 -8 -50z' fill='hsl(${(h+20)%360},45%,${pose*4+22}%)'/>
+    <rect x='66' y='196' width='120' height='150' rx='20' fill='hsl(${h2},45%,${pose*5+34}%)'/>
+    <path d='${arm}' stroke='hsl(${h},30%,86%)' stroke-width='16' fill='none' stroke-linecap='round'/>
+    <text x='126' y='332' font-family='sans-serif' font-size='22' fill='#fff' text-anchor='middle' opacity='.92'>${name}</text>
+  </svg>`;
+  return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
+}
+const fmtMB=b=>(b/1048576).toFixed(2)+' MB';
+function fname(name,seed,d){return `Koikatsu-2024_0${(seed%9)+1}${10+seed%18}_${name}_${(seed*2654435761>>>0).toString(16).slice(0,4)}.png`;}
+
+// ---------- mock 資料 ----------
+let MODE='byte', GROUPS=[], gi=0, BATCH=[];
+const REAL = window.TESTDATA && window.TESTDATA.byteGroups || null;  // testdata 真實圖
+function makeGroups(mode,total){
+  const out=[];
+  if(mode==='byte' && REAL){                 // byte 模式跑 testdata 真圖
+    REAL.slice(0,total).forEach((g,i)=>out.push({
+      mode:'byte', character:'dup#'+(i+1), real:true,
+      files:g.files.map(f=>({name:f.name,size:f.size,src:f.path})),
+      selected:new Set()}));
+    return out;
+  }
+  for(let i=0;i<total;i++){
+    const nm=NAMES[i%NAMES.length];
+    if(mode==='byte'){                       // 同檔多份：同 seed、同 size
+      const seed=1000+i, sz=(2+ (i%6))*1048576+ i*131;
+      const k=2+(i%2);                        // 2~3 份
+      out.push({mode,character:nm,files:Array.from({length:k},(_,j)=>(
+        {name:fname(nm,seed,j),size:sz,seed}))});
+    }else{                                    // 同角色不同卡面：同 name 不同 seed/size
+      const k=2+(i%4);                        // 2~5 張
+      out.push({mode,character:nm,files:Array.from({length:k},(_,j)=>(
+        {name:fname(nm,2000+i*7+j,j),size:(3+(i+j)%6)*1048576+(i*97+j*311),seed:2000+i*7+j}))});
+    }
+    out[out.length-1].selected=new Set();
+  }
+  return out;
+}
+
+// ---------- 視圖切換 ----------
+const views={sync:'v-sync',setup:'v-setup',review:'v-review',summary:'v-summary'};
+const stepOf={sync:1,setup:2,review:3,summary:4};
+function show(name){
+  for(const k in views) document.getElementById(views[k]).classList.toggle('on',k===name);
+  document.querySelectorAll('.stepper span').forEach(s=>
+    s.classList.toggle('on',+s.dataset.step===stepOf[name]));
+  window.scrollTo(0,0);
+}
+
+// ---------- 路徑設定（mock；Tauri 接原生對話框＋tauri-plugin-store 記憶） ----------
+const cfgRoot=document.getElementById('cfgRoot'), cfgDb=document.getElementById('cfgDb');
+const LS_KEY='dedupe.cfg';
+const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(LS_KEY))||{}}catch(e){return{}}};
+function saveCfg(){                            // 記住上次資料夾＋DB＋最近清單
+  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value;
+  c.recent=[c.root,...(c.recent||[]).filter(x=>x&&x!==c.root)].slice(0,5);
+  localStorage.setItem(LS_KEY,JSON.stringify(c)); renderRecent(c.recent);
+}
+function renderRecent(list){
+  const row=document.getElementById('recentRow'); row.innerHTML='';
+  if(!list||!list.length) return;
+  row.innerHTML='<span class="lbl">最近：</span>';
+  list.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p;
+    c.title='點擊載入'; c.onclick=()=>{cfgRoot.value=p;refreshDup();saveCfg();};
+    row.appendChild(c);});
+}
+function refreshDup(){
+  document.getElementById('cfgDup').textContent =
+    cfgRoot.value.replace(/[\\/]+$/,'') + '/_duplicated/';
+}
+cfgRoot.addEventListener('input',()=>{refreshDup();saveCfg();});
+cfgDb.addEventListener('input',saveCfg);
+document.getElementById('btnBrowseRoot').onclick=()=>{
+  // Tauri: const dir = await open({directory:true}); cfgRoot.value = dir;
+  cfgRoot.value='./testdata'; refreshDup(); saveCfg();
+  const s=document.getElementById('rootStatus');
+  s.className='cfg-status ok'; s.textContent='✓ 資料夾存在 · 7 個 png（mock）';
+};
+document.getElementById('btnBrowseDb').onclick=()=>{
+  // Tauri: const f = await save({filters:[{name:'sqlite',extensions:['sqlite']}]});
+  cfgDb.value='./dedupe.sqlite'; saveCfg();
+};
+(function restoreCfg(){                        // 開啟時自動帶入上次路徑
+  const c=loadCfg();
+  if(c.root) cfgRoot.value=c.root;
+  if(c.db) cfgDb.value=c.db;
+  refreshDup(); renderRecent(c.recent);
+})();
+
+// ---------- 1. SYNC（假進度） ----------
+const syncSteps=[
+  ['[scan]','walking ./testdata  (mock，不連線)', 18],
+  ['[scan]','seen=7  new=7  pruned=0', 8],
+  ['[hash:head]','6 files ~0.00 GB', 22],
+  ['[hash:full]','nothing to do', 40],
+  ['[stats]','重複組 3  可清 3 張', 12],
+];
+document.getElementById('btnSync').onclick=()=>{
+  const bar=document.getElementById('syncBar'), log=document.getElementById('syncLog'),
+        ph=document.getElementById('syncPhase'), btn=document.getElementById('btnSync');
+  btn.disabled=true; log.textContent=''; let p=0,si=0;
+  const tick=setInterval(()=>{
+    const [tag,msg,w]=syncSteps[si];
+    ph.textContent=tag+' '+msg;
+    log.textContent += `${tag} ${msg}\n`; log.scrollTop=log.scrollHeight;
+    p+=w; bar.style.width=Math.min(p,100)+'%';
+    if(++si>=syncSteps.length){clearInterval(tick); ph.textContent='✓ 同步完成';
+      document.getElementById('btnSyncSkip').disabled=false; btn.disabled=false;}
+  },650);
+};
+document.getElementById('btnSyncSkip').onclick=()=>show('setup');
+
+// ---------- 2. SETUP ----------
+function availLabel(){
+  if(MODE==='byte') return REAL ? `／ 可用 ${REAL.length} 組（testdata 真實圖）` : '／ 可用 14,293 組';
+  return '／ 可用 ~2,640 組（同角色不同卡面·示意）';
+}
+const modeHooks=[];   // 後端分支可掛 refreshAvail
+function setMode(m){
+  MODE=m;
+  document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('sel', x.dataset.mode===m));
+  document.querySelectorAll('input[name="mode"]').forEach(r=>{ r.checked=(r.value===m); });
+  document.getElementById('availTxt').textContent=availLabel();
+  modeHooks.forEach(fn=>fn());
+}
+document.querySelectorAll('.mode').forEach(m=>m.onclick=()=>setMode(m.dataset.mode));
+document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener('change',()=>setMode(r.value)));
+setMode(MODE);
+document.getElementById('btnStart').onclick=()=>{
+  const n=Math.max(1,Math.min(500,+document.getElementById('batchN').value||20));
+  BATCH=makeGroups(MODE,n); gi=0; renderGroup(); show('review');
+};
+
+// ---------- 3. REVIEW ----------
+function renderGroup(){
+  const g=BATCH[gi];
+  document.getElementById('grpCount').textContent=`組 ${gi+1} / ${BATCH.length}`;
+  document.getElementById('grpBar').style.width=((gi)/BATCH.length*100)+'%';
+  const adv=g.mode==='char';
+  const mb=document.getElementById('modeBadge');
+  mb.textContent=adv?'進階·角色資料':'位元組精確'; mb.classList.toggle('adv',adv);
+  document.getElementById('grpTitle').textContent =
+    adv ? `「${g.character}」— 同角色 ${g.files.length} 張不同卡面` : `同一組重複 · ${g.files.length} 份`;
+  const grid=document.getElementById('grpGrid'); grid.innerHTML='';
+  g.files.forEach((f,idx)=>{
+    const sel=g.selected.has(idx);
+    const el=document.createElement('div'); el.className='pic'+(sel?' sel':'');
+    const imgsrc = f.url ? f.url : (f.src ? encodeURI(f.src) : cardSVG(f.seed,g.character));
+    el.innerHTML=`<div class="imgwrap">
+        <img src="${imgsrc}" alt="" loading="lazy">
+        <div class="key">${idx<9?idx+1:'·'}</div>
+        <div class="check">✓</div></div>
+      <div class="meta"><div class="fn">${f.name}</div><div class="sz">${fmtMB(f.size)}</div></div>`;
+    el.onclick=()=>{ g.selected.has(idx)?g.selected.delete(idx):g.selected.add(idx); renderGroup(); };
+    grid.appendChild(el);
+  });
+  document.getElementById('selInfo').textContent=`已選 ${g.selected.size} 張`;
+}
+document.getElementById('btnSelOthers').onclick=()=>{
+  const g=BATCH[gi]; g.selected=new Set(g.files.map((_,i)=>i).slice(1)); renderGroup();
+};
+document.getElementById('btnNext').onclick=next;
+function next(){
+  if(gi<BATCH.length-1){gi++; renderGroup();}
+  else buildSummary();
+}
+// 鍵盤：數字切換、Enter 下一組（Anki 式）
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('v-review').classList.contains('on'))return;
+  if(e.key==='Enter')return next();
+  const n=+e.key; if(n>=1&&n<=9){const g=BATCH[gi],i=n-1; if(i<g.files.length){
+    g.selected.has(i)?g.selected.delete(i):g.selected.add(i); renderGroup();}}
+});
+
+// ---------- 4. SUMMARY ----------
+function buildSummary(){
+  const rows=document.getElementById('sumRows'); rows.innerHTML='';
+  let count=0,bytes=0;
+  BATCH.forEach((g,gidx)=>g.selected.forEach(i=>{
+    const f=g.files[i]; count++; bytes+=f.size;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${gidx+1}</td><td style="word-break:break-all">${f.name}</td><td class="sz">${fmtMB(f.size)}</td>`;
+    rows.appendChild(tr);
+  }));
+  document.getElementById('sumCount').textContent=count;
+  document.getElementById('sumSize').textContent=fmtMB(bytes);
+  show('summary');
+}
+document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;renderGroup();show('review');};
+document.getElementById('btnBackSync').onclick=()=>show('sync');
+document.getElementById('btnDelete').onclick=()=>{
+  const n=document.getElementById('sumCount').textContent;
+  toast(`已刪除 ${n} 張，其餘原地保留 ✓`);
+  // ponytail: GUI 模型不需 move/_duplicated/restore — 直接刪選中的，未選的本就沒動
+  setTimeout(()=>{show('setup');},1400);
+};
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
+  setTimeout(()=>t.classList.remove('on'),1300);}
+
+// file:// 直接開＝純 mock 預覽（SVG 假圖）；實際運作走下方 Tauri 分支。
+// ---------- Tauri 桌面後端（純 Rust，無 server） ----------
+if(window.__TAURI__){
+  const T=window.__TAURI__, invoke=T.core.invoke, toUrl=T.core.convertFileSrc;
+  async function refreshRootStatus(){
+    try{ const n=await invoke('count_pngs',{root:cfgRoot.value});
+      const s=document.getElementById('rootStatus');
+      s.className='cfg-status '+(n>0?'ok':'bad');
+      s.textContent=(n>0?'✓ 資料夾存在 · ':'✗ 找不到 png · ')+n+' 個 png';
+    }catch(e){}
+  }
+  async function refreshAvail(){
+    const el=document.getElementById('availTxt');
+    const label=MODE==='char'?'進階·角色資料':'位元';
+    try{ const s=await invoke('stats',{db:cfgDb.value, mode:MODE}); el.textContent=`／ 可用 ${s.groups} 組（${label}）`; }
+    catch(e){ el.textContent='／ 尚未同步'; }
+  }
+  cfgRoot.addEventListener('input',refreshRootStatus);
+  modeHooks.push(refreshAvail);
+  (async()=>{                                   // 預設索引檔（app data dir）
+    if(!loadCfg().db){ try{ cfgDb.value=await invoke('default_db'); refreshDup(); saveCfg(); }catch(e){} }
+    refreshRootStatus(); refreshAvail();
+  })();
+  document.getElementById('btnBrowseRoot').onclick=async()=>{
+    const d=await invoke('pick_folder'); if(d){ cfgRoot.value=d; refreshDup(); saveCfg(); refreshRootStatus(); }
+  };
+  document.getElementById('btnBrowseDb').onclick=async()=>{
+    const f=await invoke('pick_save_db'); if(f){ cfgDb.value=f; saveCfg(); }
+  };
+  document.getElementById('btnSync').onclick=async()=>{
+    const log=document.getElementById('syncLog'),ph=document.getElementById('syncPhase'),
+          bar=document.getElementById('syncBar'),btn=document.getElementById('btnSync');
+    if(!cfgRoot.value){ toast('先選卡片資料夾'); return; }
+    const full=document.getElementById('fullScan').checked;
+    btn.disabled=true; ph.textContent=`[sync] ${MODE==='char'?'解析角色資料':'掃描+雜湊'}${full?'·完整重建':''}…`; bar.style.width='40%';
+    log.textContent='invoke(sync) …\n';
+    try{
+      const s=await invoke('sync',{root:cfgRoot.value, db:cfgDb.value, mode:MODE, full});
+      bar.style.width='100%'; ph.textContent='✓ 同步完成';
+      log.textContent+=`mode=${MODE}  total=${s.total}  groups=${s.groups}  dup=${s.dup_files}  new=${s.new}  pruned=${s.pruned}\n`;
+      document.getElementById('btnSyncSkip').disabled=false;
+      document.getElementById('fullScan').checked=false; refreshAvail();
+    }catch(e){ log.textContent+='ERR '+e+'\n'; ph.textContent='✗ 失敗'; }
+    btn.disabled=false;
+  };
+  document.getElementById('btnStart').onclick=async()=>{
+    const n=Math.max(1,+document.getElementById('batchN').value||20);
+    let groups=[];
+    try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:n}); }
+    catch(e){ toast('讀取失敗：'+e); return; }
+    if(!groups.length){ toast('沒有重複組，先按同步'); return; }
+    BATCH=groups.map((g,i)=>({mode:'byte', character:'dup#'+(i+1), real:true,
+      files:g.files.map(f=>({name:f.name, size:f.size, url:toUrl(f.path)})), selected:new Set()}));
+    gi=0; renderGroup(); show('review');
+  };
+  document.getElementById('btnDelete').onclick=async()=>{
+    const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
+    if(!names.length){ toast('沒有選取任何卡'); return; }
+    try{ const res=await invoke('delete_files',{root:cfgRoot.value, db:cfgDb.value, names});
+      let msg=`已刪除 ${res.deleted} 張，釋出 ${(res.freed/1048576).toFixed(2)} MB`;
+      if(res.errors&&res.errors.length) msg+=`（${res.errors.length} 個錯誤）`;
+      toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
+    }catch(e){ toast('刪除失敗：'+e); }
+  };
+}
+</script>
+</body>
+</html>

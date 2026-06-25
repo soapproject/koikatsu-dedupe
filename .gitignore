@@ -1,0 +1,18 @@
+# build artifacts
+/src-tauri/target/
+target/
+
+# local index / databases
+*.sqlite
+*.sqlite-journal
+*.db
+
+# local test fixtures (real cards are copyrighted — not distributable)
+/testdata/
+
+# editor / tooling / caches
+/.claude/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
