@@ -1,6 +1,8 @@
 # build artifacts
 /src-tauri/target/
 target/
+# packaged release binary (uploaded to GitHub Releases, not committed)
+/koikatsu-dedupe.exe
 
 # local index / databases
 *.sqlite
