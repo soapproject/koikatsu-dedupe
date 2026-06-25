@@ -438,21 +438,30 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
             .and_then(|n| n.to_str())
             .unwrap_or(name);
         let p = root.join(base);
-        match fs::metadata(&p) {
-            Ok(md) => match trash::delete(&p) {
-                // move to OS Recycle Bin (recoverable), not a hard delete
-                Ok(_) => {
-                    freed += md.len();
-                    deleted += 1;
-                    let _ = conn.execute(
-                        "DELETE FROM files WHERE path=?",
-                        params![p.to_string_lossy().to_string()],
-                    );
-                }
-                Err(e) => errors.push(format!("{}: {}", name, e)),
-            },
-            Err(e) => errors.push(format!("{}: {}", name, e)),
+        let md = match fs::metadata(&p) {
+            Ok(m) => m,
+            Err(e) => {
+                errors.push(format!("{}: {}", name, e));
+                continue;
+            }
+        };
+        // Try the OS Recycle Bin first (local drives -> Windows Recycle Bin, recoverable).
+        let _ = trash::delete(&p);
+        // Network shares / NAS have no Recycle Bin — the shell can report success without
+        // actually removing the file. Verify; if it's still there, hard-delete it. A NAS keeps
+        // its own recycle bin / versioning, so the delete stays recoverable on that side.
+        if p.exists() {
+            if let Err(e) = fs::remove_file(&p) {
+                errors.push(format!("{}: {}", name, e));
+                continue;
+            }
         }
+        freed += md.len();
+        deleted += 1;
+        let _ = conn.execute(
+            "DELETE FROM files WHERE path=?",
+            params![p.to_string_lossy().to_string()],
+        );
     }
     (deleted, freed, errors)
 }

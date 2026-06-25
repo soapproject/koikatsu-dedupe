@@ -26,7 +26,9 @@ automatic prune of vanished files) keeps re-syncs incremental.
    **詳細資料** to lay each card's readable character-data strings (name, block
    names, mod GUIDs) side by side for a manual check, or **複製到遊戲** to copy a
    card into the game's chara folder (set its path in step 1) and compare in-game.
-4. Confirm — selected cards are moved to the Recycle Bin (recoverable); the kept card stays in place.
+4. Confirm — selected cards are deleted (Windows Recycle Bin on local drives; on a
+   network share / NAS, which has no Recycle Bin, the file is removed and the NAS's
+   own recycle bin / versioning keeps it recoverable). The kept card stays in place.
 
 Only the top level of the chosen folder is scanned (subfolders, including the app's
 own output, are ignored). The character-data parser is byte-level and never decodes

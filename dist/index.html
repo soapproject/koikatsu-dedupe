@@ -165,7 +165,7 @@
         <label>完整掃描</label>
         <label class="radio"><input type="checkbox" id="fullScan"> 重建整表（清空後重算，忽略既有雜湊）</label>
       </div>
-      <div class="cfg-hint">選取的卡確認後<b>移到回收桶（可復原）</b> · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
+      <div class="cfg-hint">選取的卡確認後<b>刪除</b>（本機進系統回收筒、NAS 交給 NAS 自己的回收筒，皆可復原） · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
     </div>
     <div class="card-panel">
       <div class="phase-tag" id="syncPhase">待命</div>
@@ -227,15 +227,15 @@
   <!-- ============ 4. SUMMARY ============ -->
   <section id="v-summary" class="view">
     <h2>確認刪除</h2>
-    <p class="sub">以下是這一批你標記的卡，確認後移到回收桶（可從回收桶還原）。</p>
+    <p class="sub">以下是這一批你標記的卡，確認後刪除（本機進系統回收筒、NAS 由 NAS 自己的回收筒接管，皆可復原）。</p>
     <div class="card-panel">
-      <div class="total">共 <b id="sumCount">0</b> 張，約 <b id="sumSize">0 MB</b>（移到回收桶）</div>
+      <div class="total">共 <b id="sumCount">0</b> 張，約 <b id="sumSize">0 MB</b>（刪除）</div>
       <div style="max-height:340px;overflow:auto">
         <table><thead><tr><th>組</th><th>檔名</th><th>大小</th></tr></thead>
         <tbody id="sumRows"></tbody></table>
       </div>
       <div style="margin-top:18px;display:flex;gap:12px">
-        <button class="danger" id="btnDelete">移到回收桶</button>
+        <button class="danger" id="btnDelete">確認刪除</button>
         <button class="ghost" id="btnBackReview">← 回去再看</button>
       </div>
     </div>
@@ -548,7 +548,7 @@ document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;showGrou
 document.getElementById('btnBackSync').onclick=()=>show('sync');
 document.getElementById('btnDelete').onclick=()=>{
   const n=document.getElementById('sumCount').textContent;
-  toast(`已移到回收桶 ${n} 張 ✓`);
+  toast(`已刪除 ${n} 張 ✓`);
   // ponytail: GUI 模型不需 move/_duplicated/restore — 刪選中的（→回收桶），未選的本就沒動
   setTimeout(()=>{show('setup');},1400);
 };
@@ -630,7 +630,7 @@ if(window.__TAURI__){
     const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
     if(!names.length){ toast('沒有選取任何卡'); return; }
     try{ const res=await invoke('delete_files',{root:cfgRoot.value, db:cfgDb.value, names});
-      let msg=`已移到回收桶 ${res.deleted} 張（${(res.freed/1048576).toFixed(2)} MB）`;
+      let msg=`已刪除 ${res.deleted} 張（${(res.freed/1048576).toFixed(2)} MB）`;
       if(res.errors&&res.errors.length) msg+=`（${res.errors.length} 個錯誤）`;
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
     }catch(e){ toast('刪除失敗：'+e, true); }
