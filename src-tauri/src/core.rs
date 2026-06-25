@@ -457,6 +457,57 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
     (deleted, freed, errors)
 }
 
+/// Extract human-readable strings (>=4 visible chars) from the appended Koikatsu
+/// block, for laying two cards in a char-mode group side by side and eyeballing
+/// them. Surfaces the "KoiKatuChara" marker, block names (Custom/Coordinate/
+/// Parameter/Status/KKEx...), the character name and mod GUIDs.
+// ponytail: a `strings`-style scan, NOT a MessagePack parse — dependency-free and
+//           robust across KK/KKS/SP/mod variants; may include some binary noise.
+//           Upgrade path: real MessagePack decode of the Parameter/KKEx blocks if
+//           structured fields are ever needed.
+pub fn card_strings(path: &Path) -> Vec<String> {
+    let (off, _) = match png_char_block(path) {
+        Some(x) => x,
+        None => return Vec::new(),
+    };
+    let mut f = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    if f.seek(SeekFrom::Start(off)).is_err() {
+        return Vec::new();
+    }
+    let mut buf = Vec::new();
+    if f.read_to_end(&mut buf).is_err() {
+        return Vec::new();
+    }
+    fn flush(cur: &mut String, out: &mut Vec<String>) {
+        if cur.chars().filter(|c| !c.is_whitespace()).count() >= 4 {
+            let s = cur.trim().to_string();
+            if out.last() != Some(&s) {
+                out.push(s); // collapse consecutive dups
+            }
+        }
+        cur.clear();
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for ch in text.chars() {
+        // printable ascii, or any non-ascii that isn't a control / decode error
+        let keep = ch != '\u{FFFD}'
+            && (ch.is_ascii_graphic() || ch == ' ' || (!ch.is_ascii() && !ch.is_control()));
+        if keep {
+            cur.push(ch);
+        } else {
+            flush(&mut cur, &mut out);
+        }
+    }
+    flush(&mut cur, &mut out);
+    out.truncate(400); // cap noisy/large cards
+    out
+}
+
 /// Count top-level pngs using free dir-entry file_type (no stat per file).
 pub fn count_pngs(root: &Path) -> usize {
     fs::read_dir(root)

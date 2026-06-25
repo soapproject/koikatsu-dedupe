@@ -22,7 +22,10 @@ automatic prune of vanished files) keeps re-syncs incremental.
 2. Pick your card folder, choose a mode, and **Sync** (scans + hashes).
    **Full scan** rebuilds the whole index from scratch.
 3. Review each duplicate group — cards are shown enlarged with filename + size.
-   Multi-select the ones to delete and advance through the batch.
+   Multi-select the ones to delete and advance through the batch. Toggle
+   **詳細資料** to lay each card's readable character-data strings (name, block
+   names, mod GUIDs) side by side for a manual check, or **複製到遊戲** to copy a
+   card into the game's chara folder (set its path in step 1) and compare in-game.
 4. Confirm — selected cards are moved to the Recycle Bin (recoverable); the kept card stays in place.
 
 Only the top level of the chosen folder is scanned (subfolders, including the app's

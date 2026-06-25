@@ -51,6 +51,14 @@ fn round_on_testdata() {
         .expect("KK_387575.png should have a char block");
     assert_eq!(clen, 116364, "char block length parser");
 
+    // detail view: readable strings must surface the KK marker (anchors the parse)
+    let strs = app_lib::core::card_strings(&testdata.join("KK_387575.png"));
+    assert!(
+        strs.iter().any(|s| s.contains("KoiKatu")),
+        "card_strings should surface the KoiKatu marker, got {:?}",
+        &strs[..strs.len().min(6)]
+    );
+
     // advanced (char-data) mode also finds the 3 dup groups on this fixture
     let rc = app_lib::core::sync(&root, &db, "char", false, &mut |_| {}).unwrap();
     assert_eq!(rc.groups, 3, "expected 3 char groups, got {}", rc.groups);

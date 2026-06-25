@@ -82,6 +82,33 @@
   .hint{color:var(--dim);font-size:13px;margin:6px 0 18px}
   .footer-bar{display:flex;gap:12px;align-items:center;margin-top:8px}
   .footer-bar .spacer{flex:1}
+  #btnDetail.on{background:var(--accent2);color:#fff}
+  .pic .copied{position:absolute;bottom:8px;right:8px;background:var(--good);color:#06210f;font-size:11px;font-weight:700;padding:3px 8px;border-radius:14px}
+  .pic .picbtns{padding:0 10px 10px}
+  button.mini{font:inherit;font-size:12px;padding:5px 8px;border-radius:6px;width:100%;background:var(--panel);border:1px solid var(--line);color:var(--txt)}
+  button.mini:hover{background:#2c313d;border-color:var(--accent)}
+  button.mini.done{background:rgba(55,192,106,.16);border-color:var(--good);color:var(--good)}
+  /* detail：逐行比對表（table-layout:fixed → 跨列對齊；同列全同=綠、有異=黃、落單格加深） */
+  .detail-wrap{margin:6px 0 18px}
+  .detail-bar{display:flex;align-items:center;gap:14px;margin-bottom:8px;font-size:12px;color:var(--dim)}
+  .detail-bar .lg{display:flex;gap:12px;align-items:center}
+  .detail-bar .lg i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+  .detail-bar .lg .g{background:rgba(55,192,106,.5);border:1px solid var(--good)}
+  .detail-bar .lg .y{background:rgba(255,210,63,.45);border:1px solid var(--hl)}
+  .dscroll{max-height:420px;overflow:auto;scroll-behavior:smooth;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .dtab{border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:100%}
+  .dtab th,.dtab td{width:160px;padding:4px 10px;border-left:1px solid var(--line);vertical-align:top;word-break:break-all}
+  .dtab th.ln,.dtab td.ln{width:38px;border-left:0;text-align:right;color:#5b6478;font-size:11px;user-select:none}
+  .dtab td{font:12px/1.5 Consolas,monospace;color:var(--txt)}
+  .dtab thead th{position:sticky;top:0;z-index:2;background:var(--panel);color:var(--accent);font-size:12px;font-weight:500;text-align:left;border-bottom:1px solid var(--line)}
+  .dtab tbody tr{opacity:.28;transition:opacity .12s,background .12s}
+  .dtab tbody tr.lit{opacity:1}
+  .dtab tbody tr.same{background:rgba(55,192,106,.13)}
+  .dtab tbody tr.same td.ln{color:var(--good)}
+  .dtab tbody tr.diff{background:rgba(255,210,63,.14)}
+  .dtab tbody tr.diff td.ln{color:var(--hl)}
+  .dtab tbody tr.diff td.odd{background:rgba(255,210,63,.30);font-weight:600;color:#fff}
+  .dtab tbody tr.scanning td{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
 
   /* summary */
   table{width:100%;border-collapse:collapse;font-size:14px}
@@ -92,6 +119,7 @@
   .total b{color:var(--warn)}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--good);color:#06210f;padding:12px 22px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.on{opacity:1}
+  .toast.err{background:var(--danger);color:#2a0000;cursor:pointer}
 </style>
 </head>
 <body>
@@ -122,6 +150,11 @@
         <label>資料庫檔</label>
         <input id="cfgDb" value="./dedupe.sqlite" spellcheck="false">
         <button class="ghost" id="btnBrowseDb">瀏覽…</button>
+      </div>
+      <div class="cfg-row">
+        <label>遊戲 chara 路徑</label>
+        <input id="cfgGame" placeholder="例：…\Koikatsu\UserData\chara\female（用於「複製到遊戲」）" spellcheck="false">
+        <button class="ghost" id="btnBrowseGame">瀏覽…</button>
       </div>
       <div class="cfg-row">
         <label>比對模式</label>
@@ -184,6 +217,7 @@
     <div class="grid" id="grpGrid"></div>
     <div class="footer-bar">
       <button class="ghost" id="btnSelOthers">選取「除第一張外」全部</button>
+      <button class="ghost" id="btnDetail">詳細資料</button>
       <span class="sub" style="margin:0" id="selInfo">已選 0 張</span>
       <span class="spacer"></span>
       <button id="btnNext">下一組 →</button>
@@ -229,6 +263,9 @@ function cardSVG(seed,name){
   return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
 }
 const fmtMB=b=>(b/1048576).toFixed(2)+' MB';
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const backend={ copyToGame:null, cardStrings:null };  // Tauri 後端填入；file:// mock 維持 null
+let DETAIL=false;                                      // 詳細資料（角色資料 chunk）展開中？
 function fname(name,seed,d){return `Koikatsu-2024_0${(seed%9)+1}${10+seed%18}_${name}_${(seed*2654435761>>>0).toString(16).slice(0,4)}.png`;}
 
 // ---------- mock 資料 ----------
@@ -271,11 +308,12 @@ function show(name){
 }
 
 // ---------- 路徑設定（mock；Tauri 接原生對話框＋tauri-plugin-store 記憶） ----------
-const cfgRoot=document.getElementById('cfgRoot'), cfgDb=document.getElementById('cfgDb');
+const cfgRoot=document.getElementById('cfgRoot'), cfgDb=document.getElementById('cfgDb'),
+      cfgGame=document.getElementById('cfgGame');
 const LS_KEY='dedupe.cfg';
 const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(LS_KEY))||{}}catch(e){return{}}};
-function saveCfg(){                            // 記住上次資料夾＋DB＋最近清單
-  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value;
+function saveCfg(){                            // 記住上次資料夾＋DB＋遊戲路徑＋最近清單
+  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value; c.game=cfgGame.value;
   c.recent=[c.root,...(c.recent||[]).filter(x=>x&&x!==c.root)].slice(0,5);
   localStorage.setItem(LS_KEY,JSON.stringify(c)); renderRecent(c.recent);
 }
@@ -289,6 +327,8 @@ function renderRecent(list){
 }
 cfgRoot.addEventListener('input',saveCfg);
 cfgDb.addEventListener('input',saveCfg);
+cfgGame.addEventListener('input',saveCfg);
+document.getElementById('btnBrowseGame').onclick=()=>{};   // Tauri 覆寫成原生選擇器
 document.getElementById('btnBrowseRoot').onclick=()=>{
   // Tauri: const dir = await open({directory:true}); cfgRoot.value = dir;
   cfgRoot.value='./testdata'; saveCfg();
@@ -303,6 +343,7 @@ document.getElementById('btnBrowseDb').onclick=()=>{
   const c=loadCfg();
   if(c.root) cfgRoot.value=c.root;
   if(c.db) cfgDb.value=c.db;
+  if(c.game) cfgGame.value=c.game;
   renderRecent(c.recent);
 })();
 
@@ -347,7 +388,7 @@ document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener('c
 setMode(MODE);
 document.getElementById('btnStart').onclick=()=>{
   const n=Math.max(1,Math.min(500,+document.getElementById('batchN').value||20));
-  BATCH=makeGroups(MODE,n); gi=0; renderGroup(); show('review');
+  BATCH=makeGroups(MODE,n); gi=0; showGroup(); show('review');
 };
 
 // ---------- 3. REVIEW ----------
@@ -368,19 +409,117 @@ function renderGroup(){
     el.innerHTML=`<div class="imgwrap">
         <img src="${imgsrc}" alt="" loading="lazy">
         <div class="key">${idx<9?idx+1:'·'}</div>
-        <div class="check">✓</div></div>
-      <div class="meta"><div class="fn">${f.name}</div><div class="sz">${fmtMB(f.size)}</div></div>`;
+        <div class="check">✓</div>
+        ${f.copied?'<div class="copied">✓ 已複製</div>':''}</div>
+      <div class="meta"><div class="fn">${esc(f.name)}</div><div class="sz">${fmtMB(f.size)}</div></div>
+      <div class="picbtns"><button class="mini${f.copied?' done':''}" data-act="game">${f.copied?'已複製 ✓':'複製到遊戲'}</button></div>`;
     el.onclick=()=>{ g.selected.has(idx)?g.selected.delete(idx):g.selected.add(idx); renderGroup(); };
+    const gb=el.querySelector('[data-act=game]');
+    gb.onclick=ev=>{ ev.stopPropagation(); copyCard(f,gb); };
     grid.appendChild(el);
   });
   document.getElementById('selInfo').textContent=`已選 ${g.selected.size} 張`;
 }
+// 複製卡片進遊戲 chara 資料夾，到遊戲內讀取比對；成功後標記「已複製」
+async function copyCard(f,btn){
+  if(!backend.copyToGame){ toast('複製到遊戲僅桌面版可用'); return; }
+  if(!cfgGame.value){ toast('先在步驟1填「遊戲 chara 路徑」'); return; }
+  if(!f.path){ toast('此卡無來源路徑'); return; }
+  try{
+    await backend.copyToGame(f.path); f.copied=true; toast('已複製到遊戲 ✓');
+    btn.classList.add('done'); btn.textContent='已複製 ✓';
+    const pic=btn.closest('.pic'), wrap=pic&&pic.querySelector('.imgwrap');
+    if(wrap && !wrap.querySelector('.copied')){
+      const b=document.createElement('div'); b.className='copied'; b.textContent='✓ 已複製'; wrap.appendChild(b);
+    }
+  }catch(e){ toast('複製失敗：'+e, true); }
+}
+
+// ---------- 詳細資料：逐行比對表 ----------
+const _modal=a=>{const m={};let best=a[0],bc=0;a.forEach(v=>{m[v]=(m[v]||0)+1;if(m[v]>bc){bc=m[v];best=v;}});return best;};
+// 抽取每張卡的可讀字串（角色名 / chunk 名 / mod GUID），快取在 f.strings
+async function ensureStrings(){
+  const g=BATCH[gi]; if(!g) return;
+  const need=g.files.filter(f=>f.strings===undefined);
+  if(!need.length) return;
+  if(!backend.cardStrings){ need.forEach(f=>f.strings=null); renderDetail(); return; }
+  await Promise.all(need.map(async f=>{
+    if(!f.path){ f.strings=null; return; }
+    try{ f.strings=await backend.cardStrings(f.path); }
+    catch(e){ f.strings=['(讀取失敗) '+e]; }
+  }));
+  if(DETAIL) renderDetail();
+}
+function removeDetail(){ const p=document.getElementById('detailPanel'); if(p) p.remove(); }
+function renderDetail(){
+  removeDetail();
+  if(!DETAIL) return;
+  const g=BATCH[gi]; if(!g) return;
+  const grid=document.getElementById('grpGrid');
+  const wrap=document.createElement('div'); wrap.className='detail-wrap'; wrap.id='detailPanel';
+  if(g.files.some(f=>f.strings===undefined)){      // 還在抓字串
+    wrap.innerHTML='<div class="detail-bar">載入角色資料中…</div>';
+    grid.after(wrap); return;
+  }
+  const cards=g.files.map(f=>({name:f.name, lines:(f.strings||[])}));
+  const n=Math.max(0,...cards.map(c=>c.lines.length));
+  let body='';
+  for(let i=0;i<n;i++){
+    const vals=cards.map(c=>c.lines[i]??'');
+    const same=vals.every(v=>v===vals[0]);
+    const maj=same?null:_modal(vals);
+    body+=`<tr data-same="${same?1:0}"><td class="ln">${i+1}</td>`+
+      vals.map(v=>`<td class="${(!same&&v!==maj)?'odd':''}">${esc(v)}</td>`).join('')+'</tr>';
+  }
+  const head='<thead><tr><th class="ln">#</th>'+cards.map((c,i)=>`<th>${i+1}. ${esc(c.name)}</th>`).join('')+'</tr></thead>';
+  wrap.innerHTML=
+    `<div class="detail-bar"><button class="ghost" id="btnRescan" style="padding:5px 12px">▶ 逐行比對</button>`+
+    `<span class="lg"><span><i class="g"></i>相同</span><span><i class="y"></i>不同</span></span>`+
+    `<span id="dtally"></span></div>`+
+    `<div class="dscroll" id="dscroll"><table class="dtab" id="dtab">${head}<tbody>${body}</tbody></table></div>`;
+  grid.after(wrap);
+  document.getElementById('dtab').style.width=(38+cards.length*160)+'px';   // 固定總寬 → 超出橫向捲
+  document.getElementById('btnRescan').onclick=runScan;
+  if(n>0) runScan();
+}
+let _scanTimer=null;
+function runScan(){
+  const tab=document.getElementById('dtab'), sc=document.getElementById('dscroll');
+  if(!tab||!sc) return;
+  if(_scanTimer){ clearTimeout(_scanTimer); _scanTimer=null; }
+  const rows=[...tab.querySelectorAll('tbody tr')];
+  rows.forEach(r=>r.classList.remove('lit','same','diff','scanning'));
+  sc.scrollTop=0;                                  // 先捲到頂
+  const ms=Math.max(6,Math.min(40,Math.round(1200/(rows.length||1))));   // 列多→更快，總長約 1.2s
+  let i=0,same=0,diff=0;
+  const step=()=>{
+    if(i>0) rows[i-1].classList.remove('scanning');
+    if(i>=rows.length){
+      const t=document.getElementById('dtally');
+      if(t) t.innerHTML=`<b style="color:var(--good)">${same}</b> 列相同 · <b style="color:var(--hl)">${diff}</b> 列不同`;
+      return;
+    }
+    const r=rows[i], isSame=r.dataset.same==='1';
+    r.classList.add('lit','scanning',isSame?'same':'diff');
+    isSame?same++:diff++;
+    const rr=r.getBoundingClientRect(), cr=sc.getBoundingClientRect();   // 只捲 dscroll，不動整頁
+    if(rr.bottom>cr.bottom) sc.scrollTop+=rr.bottom-cr.bottom;
+    else if(rr.top<cr.top) sc.scrollTop+=rr.top-cr.top;
+    i++; _scanTimer=setTimeout(step,ms);
+  };
+  step();
+}
+function showGroup(){ renderGroup(); if(DETAIL){ renderDetail(); ensureStrings(); } }
+document.getElementById('btnDetail').onclick=()=>{
+  DETAIL=!DETAIL; document.getElementById('btnDetail').classList.toggle('on',DETAIL);
+  if(DETAIL){ renderDetail(); ensureStrings(); } else removeDetail();
+};
 document.getElementById('btnSelOthers').onclick=()=>{
   const g=BATCH[gi]; g.selected=new Set(g.files.map((_,i)=>i).slice(1)); renderGroup();
 };
 document.getElementById('btnNext').onclick=next;
 function next(){
-  if(gi<BATCH.length-1){gi++; renderGroup();}
+  if(gi<BATCH.length-1){gi++; showGroup();}
   else buildSummary();
 }
 // 鍵盤：數字切換、Enter 下一組（Anki 式）
@@ -405,7 +544,7 @@ function buildSummary(){
   document.getElementById('sumSize').textContent=fmtMB(bytes);
   show('summary');
 }
-document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;renderGroup();show('review');};
+document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;showGroup();show('review');};
 document.getElementById('btnBackSync').onclick=()=>show('sync');
 document.getElementById('btnDelete').onclick=()=>{
   const n=document.getElementById('sumCount').textContent;
@@ -413,13 +552,19 @@ document.getElementById('btnDelete').onclick=()=>{
   // ponytail: GUI 模型不需 move/_duplicated/restore — 刪選中的（→回收桶），未選的本就沒動
   setTimeout(()=>{show('setup');},1400);
 };
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
-  setTimeout(()=>t.classList.remove('on'),1300);}
+function toast(msg,sticky){            // sticky=true：紅底、不自動消失，點一下才關（用於錯誤）
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(t._t); t.classList.toggle('err',!!sticky);
+  t.onclick=sticky?()=>t.classList.remove('on'):null;
+  if(!sticky) t._t=setTimeout(()=>t.classList.remove('on'),1300);
+}
 
 // file:// 直接開＝純 mock 預覽（SVG 假圖）；實際運作走下方 Tauri 分支。
 // ---------- Tauri 桌面後端（純 Rust，無 server） ----------
 if(window.__TAURI__){
   const T=window.__TAURI__, invoke=T.core.invoke, toUrl=T.core.convertFileSrc;
+  backend.cardStrings=src=>invoke('card_strings',{path:src});
+  backend.copyToGame=src=>invoke('copy_to_game',{src, destDir:cfgGame.value}); // Tauri: JS camelCase ↔ Rust snake_case
   const PHASE={scan:'掃描',head:'雜湊·head',full:'雜湊·full','char-scan':'解析角色資料',char:'雜湊·角色資料'};
   T.event.listen('sync-progress',e=>{               // 後端串流進度 → 即時更新條
     const p=e.payload, name=PHASE[p.phase]||p.phase;
@@ -452,6 +597,9 @@ if(window.__TAURI__){
   document.getElementById('btnBrowseDb').onclick=async()=>{
     const f=await invoke('pick_save_db'); if(f){ cfgDb.value=f; saveCfg(); }
   };
+  document.getElementById('btnBrowseGame').onclick=async()=>{
+    const d=await invoke('pick_folder'); if(d){ cfgGame.value=d; saveCfg(); }
+  };
   document.getElementById('btnSync').onclick=async()=>{
     const log=document.getElementById('syncLog'),ph=document.getElementById('syncPhase'),
           bar=document.getElementById('syncBar'),btn=document.getElementById('btnSync');
@@ -472,11 +620,11 @@ if(window.__TAURI__){
     const n=Math.max(1,+document.getElementById('batchN').value||20);
     let groups=[];
     try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:n}); }
-    catch(e){ toast('讀取失敗：'+e); return; }
+    catch(e){ toast('讀取失敗：'+e, true); return; }
     if(!groups.length){ toast('沒有重複組，先按同步'); return; }
-    BATCH=groups.map((g,i)=>({mode:'byte', character:'dup#'+(i+1), real:true,
-      files:g.files.map(f=>({name:f.name, size:f.size, url:toUrl(f.path)})), selected:new Set()}));
-    gi=0; renderGroup(); show('review');
+    BATCH=groups.map((g,i)=>({mode:MODE, character:'dup#'+(i+1), real:true,
+      files:g.files.map(f=>({name:f.name, size:f.size, url:toUrl(f.path), path:f.path})), selected:new Set()}));
+    gi=0; showGroup(); show('review');
   };
   document.getElementById('btnDelete').onclick=async()=>{
     const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
@@ -485,7 +633,7 @@ if(window.__TAURI__){
       let msg=`已移到回收桶 ${res.deleted} 張（${(res.freed/1048576).toFixed(2)} MB）`;
       if(res.errors&&res.errors.length) msg+=`（${res.errors.length} 個錯誤）`;
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
-    }catch(e){ toast('刪除失敗：'+e); }
+    }catch(e){ toast('刪除失敗：'+e, true); }
   };
 }
 </script>
