@@ -22,13 +22,18 @@ automatic prune of vanished files) keeps re-syncs incremental.
 2. Pick your card folder, choose a mode, and **Sync** (scans + hashes).
    **Full scan** rebuilds the whole index from scratch.
 3. Review each duplicate group — cards are shown enlarged with filename + size.
-   Multi-select the ones to delete and advance through the batch. Toggle
-   **詳細資料** to lay each card's readable character-data strings (name, block
-   names, mod GUIDs) side by side for a manual check, or **複製到遊戲** to copy a
-   card into the game's chara folder (set its path in step 1) and compare in-game.
+   Multi-select the ones to delete and move through the batch (prev/next buttons or
+   ←/→). Toggle the detail view to lay each card's readable character-data strings
+   (name, block names, mod GUIDs) side by side for a manual check, or copy a card
+   into the game's chara folder (set its path in step 1) to compare in-game. Or hit
+   **auto-finish** to keep the newest card per group across the whole pool and jump
+   straight to the confirmation list.
 4. Confirm — selected cards are deleted (Windows Recycle Bin on local drives; on a
    network share / NAS, which has no Recycle Bin, the file is removed and the NAS's
    own recycle bin / versioning keeps it recoverable). The kept card stays in place.
+
+The UI is plain-language with a first-run guided tour; a **?** dialog explains how
+the matching, indexing, incremental re-sync and deletion actually work.
 
 Only the top level of the chosen folder is scanned (subfolders, including the app's
 own output, are ignored). The character-data parser is byte-level and never decodes

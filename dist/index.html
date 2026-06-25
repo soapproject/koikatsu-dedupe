@@ -120,15 +120,34 @@
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--good);color:#06210f;padding:12px 22px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.on{opacity:1}
   .toast.err{background:var(--danger);color:#2a0000;cursor:pointer}
+
+  /* ? 說明鈕 */
+  .help{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--accent);color:var(--accent);background:transparent;font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+  .help:hover{background:var(--accent);color:#fff}
+  /* how it works modal */
+  .mask{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .mask.on{display:flex}
+  .sheet{max-width:620px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px 26px;max-height:86vh;overflow:auto}
+  .sheet h3{margin:0 0 4px;font-size:20px} .sheet .lead{color:var(--dim);margin:0 0 16px}
+  .sheet h4{margin:18px 0 6px;font-size:15px;color:var(--accent)} .sheet p{margin:6px 0;line-height:1.65}
+  .sheet ul{margin:6px 0;padding-left:20px} .sheet li{margin:5px 0;line-height:1.6}
+  .sheet .x{margin-top:20px;display:flex;gap:10px;justify-content:flex-end}
+  .sheet code{font-family:Consolas,monospace;font-size:12.5px;background:#12141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--accent)}
+  /* crayon tour overlay */
+  #overlay{position:fixed;inset:0;pointer-events:none;z-index:40}
+  #crayonSvg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  .cl{position:fixed;max-width:215px;font:15px/1.3 "Segoe Print","Comic Sans MS","Comic Sans",cursive;font-weight:700;pointer-events:none;background:rgba(13,15,20,.85);border:1.5px solid currentColor;border-radius:10px;padding:6px 10px;text-shadow:0 1px 2px #000}
+  .tour-dismiss{position:fixed;right:18px;bottom:18px;z-index:45;display:none;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:24px;padding:9px 15px;font-size:13px;cursor:pointer;box-shadow:0 6px 18px #0006}
+  .tour-dismiss:hover{border-color:var(--accent)}
 </style>
 </head>
 <body>
 <header>
-  <h1>🃏 卡片去重</h1>
+  <h1>🃏 卡片去重 <button class="help" id="helpBtn" title="這是什麼？怎麼運作？">?</button></h1>
   <div class="stepper">
-    <span data-step="1" class="on">1 Sync</span>
-    <span data-step="2">2 設定</span>
-    <span data-step="3">3 比對</span>
+    <span data-step="1" class="on">1 整理卡片</span>
+    <span data-step="2">2 選一批</span>
+    <span data-step="3">3 挑重複</span>
     <span data-step="4">4 刪除</span>
   </div>
 </header>
@@ -136,8 +155,8 @@
 <main>
   <!-- ============ 1. SYNC ============ -->
   <section id="v-sync" class="view on">
-    <h2>同步卡池</h2>
-    <p class="sub">掃描 → 雜湊 → 清理消失的卡。只處理變動，不整池重算。</p>
+    <h2>整理卡片（建一份清單）</h2>
+    <p class="sub">先掃一次你的卡片資料夾、記下每張卡的特徵，之後找重複都用這份清單，不必每次重掃。</p>
     <div class="card-panel" style="margin-bottom:16px">
       <div class="cfg-row">
         <label>卡片資料夾</label>
@@ -147,60 +166,61 @@
       <div class="cfg-status ok" id="rootStatus">✓ 資料夾存在 · 7 個 png（mock）</div>
       <div class="recent" id="recentRow"></div>
       <div class="cfg-row">
-        <label>資料庫檔</label>
+        <label>索引檔</label>
         <input id="cfgDb" value="./dedupe.sqlite" spellcheck="false">
-        <button class="ghost" id="btnBrowseDb">瀏覽…</button>
+        <button class="ghost" id="btnBrowseDb">選位置</button>
       </div>
       <div class="cfg-row">
-        <label>遊戲 chara 路徑</label>
-        <input id="cfgGame" placeholder="例：…\Koikatsu\UserData\chara\female（用於「複製到遊戲」）" spellcheck="false">
-        <button class="ghost" id="btnBrowseGame">瀏覽…</button>
+        <label>遊戲路徑</label>
+        <input id="cfgGame" placeholder="（選填）例：…\Koikatsu\UserData\chara\female，用於「複製到遊戲目錄」" spellcheck="false">
+        <button class="ghost" id="btnBrowseGame">選資料夾</button>
       </div>
       <div class="cfg-row">
-        <label>比對模式</label>
-        <label class="radio"><input type="radio" name="mode" value="byte" checked> 位元精確</label>
-        <label class="radio"><input type="radio" name="mode" value="char"> 進階·角色資料（無視卡面）</label>
+        <label>找重複的方式</label>
+        <span id="modeChoose" style="display:inline-flex;gap:16px">
+          <label class="radio"><input type="radio" name="mode" value="byte" checked> 完全一樣的檔案</label>
+          <label class="radio"><input type="radio" name="mode" value="char"> 同角色、不同封面</label>
+        </span>
       </div>
       <div class="cfg-row">
-        <label>完整掃描</label>
-        <label class="radio"><input type="checkbox" id="fullScan"> 重建整表（清空後重算，忽略既有雜湊）</label>
+        <label>重建索引</label>
+        <label class="radio" id="rebuildOpt"><input type="checkbox" id="fullScan"> 重新建立整份清單</label>
       </div>
-      <div class="cfg-hint">選取的卡確認後<b>刪除</b>（本機進系統回收筒、NAS 交給 NAS 自己的回收筒，皆可復原） · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
     </div>
     <div class="card-panel">
-      <div class="phase-tag" id="syncPhase">待命</div>
+      <div class="phase-tag" id="syncPhase">待命中</div>
       <div class="bar"><i id="syncBar"></i></div>
-      <div class="log" id="syncLog">按「開始同步」啟動…</div>
+      <div class="log" id="syncLog">按「開始整理」啟動…</div>
       <div style="margin-top:16px;display:flex;gap:12px">
-        <button id="btnSync">開始同步</button>
-        <button class="ghost" id="btnSyncSkip" disabled>進入處理 →</button>
+        <button id="btnSync">開始整理</button>
+        <button class="ghost" id="btnSyncSkip" disabled>下一步 →</button>
       </div>
     </div>
   </section>
 
   <!-- ============ 2. SETUP ============ -->
   <section id="v-setup" class="view">
-    <h2>處理設定</h2>
-    <p class="sub">選擇比對模式與這一批要處理的組數。</p>
+    <h2>選一批來看</h2>
+    <p class="sub">從剛剛那份清單，把重複的卡撈出來處理。一次看幾組由你決定。</p>
     <div class="card-panel">
-      <div class="opt-row">
+      <div class="opt-row" id="modeCards">
         <div class="mode sel" data-mode="byte">
-          <b>位元組精確比對</b>
-          <small>完全相同的檔案（同一張卡的副本）。組內每張一模一樣，留一即可。</small>
+          <b>完全一樣的檔案</b>
+          <small>同一張卡被複製或改名存了好幾份，內容一模一樣，留一張即可。</small>
         </div>
         <div class="mode" data-mode="char">
-          <b>進階：角色資料比對 <span class="badge adv">無視卡面</span></b>
-          <small>只雜湊 PNG 內嵌的 Koikatsu 角色資料，忽略卡面圖。可揪出「同角色、不同卡面」的重複。</small>
+          <b>同角色、不同封面 <span class="badge adv">無視封面</span></b>
+          <small>只看卡片裡的角色資料、不管封面圖，所以換了封面的同一個角色也抓得到。</small>
         </div>
       </div>
-      <div class="num">
-        <label>這批處理組數</label>
+      <div class="num" id="batchRow">
+        <label>一次看幾組</label>
         <input id="batchN" type="number" value="20" min="1" max="500">
         <span class="sub" style="margin:0" id="availTxt">／ 可用 14,293 組</span>
       </div>
       <div style="display:flex;gap:12px">
-        <button class="ghost" id="btnBackSync">← 回同步（換資料夾）</button>
-        <button id="btnStart">開始處理 →</button>
+        <button class="ghost" id="btnBackSync">← 回上一步</button>
+        <button id="btnStart">開始挑 →</button>
       </div>
     </div>
   </section>
@@ -208,28 +228,31 @@
   <!-- ============ 3. REVIEW ============ -->
   <section id="v-review" class="view">
     <div class="review-top">
-      <span class="grpcount" id="grpCount">組 1 / 20</span>
+      <span class="grpcount" id="grpCount">第 1 組 / 共 20 組</span>
       <div class="minibar"><i id="grpBar"></i></div>
-      <span class="badge" id="modeBadge">位元組精確</span>
+      <span class="badge" id="modeBadge">完全一樣的檔案</span>
     </div>
-    <h2 id="grpTitle">同一組重複</h2>
-    <p class="hint" id="grpHint">點選要<b style="color:var(--hl)">刪除</b>的卡（可多選，高亮＝已選）。未選的會保留。數字鍵 1–9 快速切換，Enter 下一組。</p>
+    <h2 id="grpTitle">這幾張是重複的</h2>
+    <p class="hint" id="grpHint">點一下你<b style="color:var(--hl)">想刪掉</b>的卡（會亮黃框），沒點的會留著。挑好按「下一組」。（數字鍵 1–9 快速選、← → 換組）</p>
     <div class="grid" id="grpGrid"></div>
     <div class="footer-bar">
-      <button class="ghost" id="btnSelOthers">選取「除第一張外」全部</button>
-      <button class="ghost" id="btnDetail">詳細資料</button>
-      <span class="sub" style="margin:0" id="selInfo">已選 0 張</span>
+      <button class="ghost" id="btnSelOthers">留第一張、其餘都選</button>
+      <button class="ghost" id="btnDetail">看裡面內容</button>
+      <button class="ghost" id="btnAuto" style="border-color:var(--warn);color:var(--warn)">⚡ 全部交給它</button>
+      <span class="sub" style="margin:0" id="selInfo">已選 0 張要刪</span>
       <span class="spacer"></span>
+      <button class="ghost" id="btnPrev">← 上一組</button>
       <button id="btnNext">下一組 →</button>
     </div>
   </section>
 
   <!-- ============ 4. SUMMARY ============ -->
   <section id="v-summary" class="view">
-    <h2>確認刪除</h2>
-    <p class="sub">以下是這一批你標記的卡，確認後刪除（本機進系統回收筒、NAS 由 NAS 自己的回收筒接管，皆可復原）。</p>
+    <h2>最後確認</h2>
+    <p class="sub">這些是你標記要刪的卡。確認後才會真的刪 —— 本機進系統回收桶、NAS 進 NAS 回收桶，都救得回來。</p>
     <div class="card-panel">
-      <div class="total">共 <b id="sumCount">0</b> 張，約 <b id="sumSize">0 MB</b>（刪除）</div>
+      <div class="total">共 <b id="sumCount">0</b> 張，約 <b id="sumSize">0 MB</b></div>
+      <div id="sumWarn" style="display:none;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:rgba(255,180,84,.14);border:1px solid var(--warn);color:var(--warn);font-size:13px">⚠ 這是「同角色、不同封面」的卡 —— 被刪那幾張的<b>封面會消失</b>（仍可從回收桶復原）。</div>
       <div style="max-height:340px;overflow:auto">
         <table><thead><tr><th>組</th><th>檔名</th><th>大小</th></tr></thead>
         <tbody id="sumRows"></tbody></table>
@@ -243,6 +266,36 @@
 </main>
 
 <div class="toast" id="toast"></div>
+
+<!-- ? How it works（技術細節）-->
+<div class="mask" id="mask"><div class="sheet">
+  <h3>How it works <span style="color:var(--dim);font-size:14px;font-weight:400">· 技術細節</span></h3>
+  <p class="lead">兩種比對模式：<b>全圖 hash</b> 與 <b>只比對角色資料區塊</b>，共用一張 SQLite 索引表做增量更新。</p>
+  <h4>一般模式 · 全圖 hash（找一模一樣的檔案，快速跳過明顯不一致的）</h4>
+  <p>先比對檔案大小，size 不一樣的跳過；再比前 1 MB 的 hash，都一樣才跑完整檔 hash（都用 <code>xxHash64</code>）。</p>
+  <h4>進階模式 · 只比角色資料區塊（找同角色、不同卡面，無視卡面差異）</h4>
+  <p>走 chunk 到 <code>IEND</code>，只 hash 後面那段角色資料、卡面不管。先比長度（<code>char_len</code>）跳掉不一樣的，再比內容（<code>char_hash</code>）分組。純位元組、不解碼字串 → 非 UTF-8 角色名也安全。</p>
+  <h4>怎麼建表</h4>
+  <p>掃描頂層 PNG → 寫進 SQLite 單表 <code>files(path PK, size, mtime, head_hash, full_hash, char_len, char_hash)</code> → 依模式分層把雜湊填進對應欄位。這張表就是兩種模式<b>共用的索引</b>；之後每批處理都查表，不再逐檔讀磁碟。</p>
+  <h4>為什麼不用每次全表掃描</h4>
+  <ul>
+    <li>scan 用 <code>INSERT OR IGNORE</code> 只補新卡、<code>prune</code> 清掉消失的卡，既有列不動。</li>
+    <li>每層雜湊的候選 SELECT 都過濾 <code>hash IS NULL</code> → 只算還沒算的。</li>
+    <li>兩種模式用<b>各自獨立的欄位</b>（位元＝head/full、進階＝char_len/char_hash）→ 換模式重用同一批列，只補那一欄。</li>
+    <li>長同步每約 <code>10s</code> commit 一次，中途關掉下次靠 <code>hash IS NULL</code> 接著跑。</li>
+    <li>想強制整池重算就勾「重建索引」清表重建（只有同路徑被<b>原地改內容</b>時才需要，因為 <code>INSERT OR IGNORE</code> 不會更新既有列）。</li>
+  </ul>
+  <h4>會掃子資料夾嗎？</h4>
+  <p><b>不會，只掃頂層。</b>子資料夾一律忽略（含工具自己的輸出）—— 讓正式卡池維持扁平、範圍可控。</p>
+  <h4>刪除怎麼處理</h4>
+  <p>先試 OS 回收桶（<code>trash</code> ／ Windows <code>IFileOperation</code>），<b>刪完驗證檔案真的不見了</b>才算數；網路磁碟沒有回收桶、shell 可能假報成功 → 偵測到還在就 <code>fs::remove_file</code> 硬刪，交給 NAS 自身的回收桶／版本控制保留可復原性。同時把該列從索引表移除。</p>
+  <div class="x"><button class="ghost" id="reTour">重看所有導覽圈</button><button id="closeHelp">確認</button></div>
+</div></div>
+
+<!-- 蠟筆導覽 -->
+<div id="overlay"><svg id="crayonSvg"></svg></div>
+<div id="labels"></div>
+<button class="tour-dismiss" id="tourDismiss">這頁知道了 ✕</button>
 
 <script>
 // ---------- mock 卡片圖（內嵌 SVG，file:// 預覽用） ----------
@@ -266,6 +319,7 @@ const fmtMB=b=>(b/1048576).toFixed(2)+' MB';
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const backend={ copyToGame:null, cardStrings:null };  // Tauri 後端填入；file:// mock 維持 null
 let DETAIL=false;                                      // 詳細資料（角色資料 chunk）展開中？
+let CURVIEW='sync';                                    // 目前在哪一步（給導覽圈用）
 function fname(name,seed,d){return `Koikatsu-2024_0${(seed%9)+1}${10+seed%18}_${name}_${(seed*2654435761>>>0).toString(16).slice(0,4)}.png`;}
 
 // ---------- mock 資料 ----------
@@ -301,10 +355,12 @@ function makeGroups(mode,total){
 const views={sync:'v-sync',setup:'v-setup',review:'v-review',summary:'v-summary'};
 const stepOf={sync:1,setup:2,review:3,summary:4};
 function show(name){
+  CURVIEW=name;
   for(const k in views) document.getElementById(views[k]).classList.toggle('on',k===name);
   document.querySelectorAll('.stepper span').forEach(s=>
     s.classList.toggle('on',+s.dataset.step===stepOf[name]));
   window.scrollTo(0,0);
+  drawTour();
 }
 
 // ---------- 路徑設定（mock；Tauri 接原生對話框＋tauri-plugin-store 記憶） ----------
@@ -312,8 +368,8 @@ const cfgRoot=document.getElementById('cfgRoot'), cfgDb=document.getElementById(
       cfgGame=document.getElementById('cfgGame');
 const LS_KEY='dedupe.cfg';
 const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(LS_KEY))||{}}catch(e){return{}}};
-function saveCfg(){                            // 記住上次資料夾＋DB＋遊戲路徑＋最近清單
-  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value; c.game=cfgGame.value;
+function saveCfg(){                            // 記住上次資料夾＋DB＋遊戲路徑＋模式＋最近清單
+  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value; c.game=cfgGame.value; c.mode=MODE;
   c.recent=[c.root,...(c.recent||[]).filter(x=>x&&x!==c.root)].slice(0,5);
   localStorage.setItem(LS_KEY,JSON.stringify(c)); renderRecent(c.recent);
 }
@@ -322,7 +378,7 @@ function renderRecent(list){
   if(!list||!list.length) return;
   row.innerHTML='<span class="lbl">最近：</span>';
   list.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p;
-    c.title='點擊載入'; c.onclick=()=>{cfgRoot.value=p;saveCfg();};
+    c.title='點擊載入'; c.onclick=()=>{cfgRoot.value=p; cfgRoot.dispatchEvent(new Event('input'));}; // input 事件 → saveCfg + 重算 png 數
     row.appendChild(c);});
 }
 cfgRoot.addEventListener('input',saveCfg);
@@ -344,6 +400,7 @@ document.getElementById('btnBrowseDb').onclick=()=>{
   if(c.root) cfgRoot.value=c.root;
   if(c.db) cfgDb.value=c.db;
   if(c.game) cfgGame.value=c.game;
+  if(c.mode) MODE=c.mode;                     // 帶回上次的比對模式（setMode(MODE) 隨後套用到 UI）
   renderRecent(c.recent);
 })();
 
@@ -364,7 +421,7 @@ document.getElementById('btnSync').onclick=()=>{
     ph.textContent=tag+' '+msg;
     log.textContent += `${tag} ${msg}\n`; log.scrollTop=log.scrollHeight;
     p+=w; bar.style.width=Math.min(p,100)+'%';
-    if(++si>=syncSteps.length){clearInterval(tick); ph.textContent='✓ 同步完成';
+    if(++si>=syncSteps.length){clearInterval(tick); ph.textContent='✓ 整理完成';
       document.getElementById('btnSyncSkip').disabled=false; btn.disabled=false;}
   },650);
 };
@@ -383,8 +440,8 @@ function setMode(m){
   document.getElementById('availTxt').textContent=availLabel();
   modeHooks.forEach(fn=>fn());
 }
-document.querySelectorAll('.mode').forEach(m=>m.onclick=()=>setMode(m.dataset.mode));
-document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener('change',()=>setMode(r.value)));
+document.querySelectorAll('.mode').forEach(m=>m.onclick=()=>{ setMode(m.dataset.mode); saveCfg(); });
+document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener('change',()=>{ setMode(r.value); saveCfg(); }));
 setMode(MODE);
 document.getElementById('btnStart').onclick=()=>{
   const n=Math.max(1,Math.min(500,+document.getElementById('batchN').value||20));
@@ -394,13 +451,14 @@ document.getElementById('btnStart').onclick=()=>{
 // ---------- 3. REVIEW ----------
 function renderGroup(){
   const g=BATCH[gi];
-  document.getElementById('grpCount').textContent=`組 ${gi+1} / ${BATCH.length}`;
+  document.getElementById('grpCount').textContent=`第 ${gi+1} 組 / 共 ${BATCH.length} 組`;
   document.getElementById('grpBar').style.width=((gi)/BATCH.length*100)+'%';
+  document.getElementById('btnPrev').disabled = gi===0;
   const adv=g.mode==='char';
   const mb=document.getElementById('modeBadge');
-  mb.textContent=adv?'進階·角色資料':'位元組精確'; mb.classList.toggle('adv',adv);
+  mb.textContent=adv?'同一個角色 · 封面不同':'完全一樣的檔案'; mb.classList.toggle('adv',adv);
   document.getElementById('grpTitle').textContent =
-    adv ? `「${g.character}」— 同角色 ${g.files.length} 張不同卡面` : `同一組重複 · ${g.files.length} 份`;
+    adv ? `這幾張其實是同一個角色` : `這幾張是一模一樣的檔案`;
   const grid=document.getElementById('grpGrid'); grid.innerHTML='';
   g.files.forEach((f,idx)=>{
     const sel=g.selected.has(idx);
@@ -412,21 +470,23 @@ function renderGroup(){
         <div class="check">✓</div>
         ${f.copied?'<div class="copied">✓ 已複製</div>':''}</div>
       <div class="meta"><div class="fn">${esc(f.name)}</div><div class="sz">${fmtMB(f.size)}</div></div>
-      <div class="picbtns"><button class="mini${f.copied?' done':''}" data-act="game">${f.copied?'已複製 ✓':'複製到遊戲'}</button></div>`;
+      <div class="picbtns"><button class="mini${f.copied?' done':''}" data-act="game">${f.copied?'已複製 ✓':'複製到遊戲目錄'}</button></div>`;
     el.onclick=()=>{ g.selected.has(idx)?g.selected.delete(idx):g.selected.add(idx); renderGroup(); };
     const gb=el.querySelector('[data-act=game]');
     gb.onclick=ev=>{ ev.stopPropagation(); copyCard(f,gb); };
+    el.querySelector('img').addEventListener('load', ()=>drawTour());  // 圖載入後高度才確定 → 重畫導覽圈
     grid.appendChild(el);
   });
-  document.getElementById('selInfo').textContent=`已選 ${g.selected.size} 張`;
+  document.getElementById('selInfo').textContent=`已選 ${g.selected.size} 張要刪`;
+  drawTour();
 }
 // 複製卡片進遊戲 chara 資料夾，到遊戲內讀取比對；成功後標記「已複製」
 async function copyCard(f,btn){
-  if(!backend.copyToGame){ toast('複製到遊戲僅桌面版可用'); return; }
+  if(!backend.copyToGame){ toast('複製到遊戲目錄僅桌面版可用'); return; }
   if(!cfgGame.value){ toast('先在步驟1填「遊戲 chara 路徑」'); return; }
   if(!f.path){ toast('此卡無來源路徑'); return; }
   try{
-    await backend.copyToGame(f.path); f.copied=true; toast('已複製到遊戲 ✓');
+    await backend.copyToGame(f.path); f.copied=true; toast('已複製到遊戲目錄 ✓');
     btn.classList.add('done'); btn.textContent='已複製 ✓';
     const pic=btn.closest('.pic'), wrap=pic&&pic.querySelector('.imgwrap');
     if(wrap && !wrap.querySelector('.copied')){
@@ -518,6 +578,8 @@ document.getElementById('btnSelOthers').onclick=()=>{
   const g=BATCH[gi]; g.selected=new Set(g.files.map((_,i)=>i).slice(1)); renderGroup();
 };
 document.getElementById('btnNext').onclick=next;
+document.getElementById('btnPrev').onclick=prev;
+function prev(){ if(gi>0){ gi--; showGroup(); } }
 function next(){
   if(gi<BATCH.length-1){gi++; showGroup();}
   else buildSummary();
@@ -525,7 +587,8 @@ function next(){
 // 鍵盤：數字切換、Enter 下一組（Anki 式）
 document.addEventListener('keydown',e=>{
   if(!document.getElementById('v-review').classList.contains('on'))return;
-  if(e.key==='Enter')return next();
+  if(e.key==='Enter'||e.key==='ArrowRight')return next();
+  if(e.key==='ArrowLeft')return prev();
   const n=+e.key; if(n>=1&&n<=9){const g=BATCH[gi],i=n-1; if(i<g.files.length){
     g.selected.has(i)?g.selected.delete(i):g.selected.add(i); renderGroup();}}
 });
@@ -542,8 +605,10 @@ function buildSummary(){
   }));
   document.getElementById('sumCount').textContent=count;
   document.getElementById('sumSize').textContent=fmtMB(bytes);
+  document.getElementById('sumWarn').style.display = (MODE==='char') ? 'block' : 'none';
   show('summary');
 }
+document.getElementById('btnAuto').onclick=()=>toast('全部自動：桌面版功能');  // Tauri 覆寫成 autoRun
 document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;showGroup();show('review');};
 document.getElementById('btnBackSync').onclick=()=>show('sync');
 document.getElementById('btnDelete').onclick=()=>{
@@ -565,7 +630,7 @@ if(window.__TAURI__){
   const T=window.__TAURI__, invoke=T.core.invoke, toUrl=T.core.convertFileSrc;
   backend.cardStrings=src=>invoke('card_strings',{path:src});
   backend.copyToGame=src=>invoke('copy_to_game',{src, destDir:cfgGame.value}); // Tauri: JS camelCase ↔ Rust snake_case
-  const PHASE={scan:'掃描',head:'雜湊·head',full:'雜湊·full','char-scan':'解析角色資料',char:'雜湊·角色資料'};
+  const PHASE={scan:'掃描卡片',head:'比對中',full:'比對中','char-scan':'讀取角色資料',char:'讀取角色資料'};
   T.event.listen('sync-progress',e=>{               // 後端串流進度 → 即時更新條
     const p=e.payload, name=PHASE[p.phase]||p.phase;
     const ph=document.getElementById('syncPhase'), bar=document.getElementById('syncBar');
@@ -581,9 +646,12 @@ if(window.__TAURI__){
   }
   async function refreshAvail(){
     const el=document.getElementById('availTxt');
-    const label=MODE==='char'?'進階·角色資料':'位元';
-    try{ const s=await invoke('stats',{db:cfgDb.value, mode:MODE}); el.textContent=`／ 可用 ${s.groups} 組（${label}）`; }
-    catch(e){ el.textContent='／ 尚未同步'; }
+    const label=MODE==='char'?'同角色不同封面':'完全一樣';
+    try{ const s=await invoke('stats',{db:cfgDb.value, mode:MODE});
+      el.textContent = s.synced
+        ? `／ 可用 ${s.groups} 組`
+        : `／ 「${label}」還沒整理過 — 回上一步跑一次`;
+    }catch(e){ el.textContent='／ 還沒整理'; }
   }
   cfgRoot.addEventListener('input',refreshRootStatus);
   modeHooks.push(refreshAvail);
@@ -605,15 +673,15 @@ if(window.__TAURI__){
           bar=document.getElementById('syncBar'),btn=document.getElementById('btnSync');
     if(!cfgRoot.value){ toast('先選卡片資料夾'); return; }
     const full=document.getElementById('fullScan').checked;
-    btn.disabled=true; ph.textContent=`[sync] 啟動${full?'·完整重建':''}…`; bar.style.width='0%';
-    log.textContent='invoke(sync) …\n';
+    btn.disabled=true; ph.textContent=`開始整理${full?'（重建整份清單）':''}…`; bar.style.width='0%';
+    log.textContent='開始整理…\n';
     try{
       const s=await invoke('sync',{root:cfgRoot.value, db:cfgDb.value, mode:MODE, full});
-      bar.style.width='100%'; ph.textContent='✓ 同步完成';
-      log.textContent+=`mode=${MODE}  total=${s.total}  groups=${s.groups}  dup=${s.dup_files}  new=${s.new}  pruned=${s.pruned}\n`;
+      bar.style.width='100%'; ph.textContent='✓ 整理完成';
+      log.textContent+=`完成 · 共 ${s.total} 張，找到 ${s.groups} 組重複（可清 ${s.dup_files} 張）；新增 ${s.new}、移除 ${s.pruned}\n`;
       document.getElementById('btnSyncSkip').disabled=false;
       document.getElementById('fullScan').checked=false; refreshAvail();
-    }catch(e){ log.textContent+='ERR '+e+'\n'; ph.textContent='✗ 失敗'; }
+    }catch(e){ log.textContent+='錯誤：'+e+'\n'; ph.textContent='✗ 出錯了'; }
     btn.disabled=false;
   };
   document.getElementById('btnStart').onclick=async()=>{
@@ -621,7 +689,7 @@ if(window.__TAURI__){
     let groups=[];
     try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:n}); }
     catch(e){ toast('讀取失敗：'+e, true); return; }
-    if(!groups.length){ toast('沒有重複組，先按同步'); return; }
+    if(!groups.length){ toast('找不到重複的卡，先回上一步「整理卡片」跑一次'); return; }
     BATCH=groups.map((g,i)=>({mode:MODE, character:'dup#'+(i+1), real:true,
       files:g.files.map(f=>({name:f.name, size:f.size, url:toUrl(f.path), path:f.path})), selected:new Set()}));
     gi=0; showGroup(); show('review');
@@ -635,7 +703,69 @@ if(window.__TAURI__){
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
     }catch(e){ toast('刪除失敗：'+e, true); }
   };
+  // ⚡ 全部自動：抓全部重複組，每組留 mtime 最新的一張，其餘進步驟4 摘要等你確認刪除
+  async function autoRun(){
+    let groups=[];
+    try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:1000000}); }
+    catch(e){ toast('讀取失敗：'+e, true); return; }
+    if(!groups.length){ toast('找不到重複的卡，先回上一步「整理卡片」跑一次'); return; }
+    BATCH=groups.map((g,i)=>{
+      const files=g.files.map(f=>({name:f.name, size:f.size, mtime:f.mtime, url:toUrl(f.path), path:f.path}));
+      let keep=0; for(let j=1;j<files.length;j++) if(files[j].mtime>files[keep].mtime) keep=j;  // 留最新
+      return {mode:MODE, character:'dup#'+(i+1), real:true, files,
+              selected:new Set(files.map((_,j)=>j).filter(j=>j!==keep))};
+    });
+    gi=BATCH.length-1; buildSummary();
+  }
+  document.getElementById('btnAuto').onclick=autoRun;
 }
+
+// ---------- ? How it works ----------
+const mask=document.getElementById('mask');
+document.getElementById('helpBtn').onclick=()=>mask.classList.add('on');
+document.getElementById('closeHelp').onclick=()=>mask.classList.remove('on');
+mask.onclick=e=>{ if(e.target===mask) mask.classList.remove('on'); };
+
+// ---------- 蠟筆導覽（每步只圈會卡住的點；首次顯示、關掉記住）----------
+const TOUR_KEY='dedupe.tourSeen';
+let SEEN = new Set(JSON.parse(localStorage.getItem(TOUR_KEY)||'[]'));   // 已關掉導覽的步驟（逐步記憶）
+const saveSeen=()=>localStorage.setItem(TOUR_KEY, JSON.stringify([...SEEN]));
+const ANN={
+  sync:[ {sel:'#cfgDb',      text:'會在這份檔案內建立卡片清單，之後都用這份清單比對檔案', side:'bottom', color:'#ffb454'},
+         {sel:'#rebuildOpt', text:'重新建立整份清單：比較花時間，但能確保清單跟資料夾現況完全一致', side:'bottom', color:'#7ee0a0'},
+         {sel:'#btnSync',    text:'開始掃描資料夾、建立卡片清單 —— 之後找重複都用這份清單', side:'bottom', color:'#ff8a9b'} ],
+  setup:[ {sel:'#modeCards', text:'用上一步建好的清單來挑檔案。換成還沒整理過的方式 → 清單還沒建，要先回上一步整理一次（免勾「重建索引」）', side:'bottom', color:'#ff8a9b'} ],
+  review:[ {sel:'#btnAuto', text:'自動幫每組留最新的一張、其餘列成清單；你確認後才會刪（可復原）', side:'bottom', color:'#ffd23f'} ],
+  summary:[ {sel:'#btnDelete', text:'按下才真的刪 —— 本機進系統回收桶、NAS 進 NAS 回收桶，都救得回來', side:'bottom', color:'#ff8a9b'} ],
+};
+const C_DEFS=`<defs><filter id="rough" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.014" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/></filter></defs>`;
+function drawTour(){
+  const svg=document.getElementById('crayonSvg'), labels=document.getElementById('labels'), dis=document.getElementById('tourDismiss');
+  if(!svg) return;
+  svg.innerHTML=C_DEFS; labels.innerHTML='';
+  const list = SEEN.has(CURVIEW) ? [] : (ANN[CURVIEW]||[]);
+  dis.style.display = list.length ? 'block' : 'none';
+  list.forEach(a=>{
+    const el=document.querySelector(a.sel); if(!el) return;
+    const r=el.getBoundingClientRect(); if(!r.width) return;
+    const cx=r.left+r.width/2, cy=r.top+r.height/2, rx=r.width/2+16, ry=r.height/2+12;
+    svg.insertAdjacentHTML('beforeend',`<g filter="url(#rough)" stroke="${a.color}" fill="none" stroke-linecap="round"><ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" stroke-width="3.4"/><ellipse cx="${cx+2}" cy="${cy-1}" rx="${rx-2.5}" ry="${ry+1.5}" stroke-width="2" opacity=".55"/></g>`);
+    let lx,ly,ax,ay,bx,by,tf;
+    if(a.side==='bottom'){ ax=cx;ay=cy+ry;bx=cx;by=cy+ry+18;lx=cx;ly=by;tf='translateX(-50%)'; }
+    else if(a.side==='top'){ ax=cx;ay=cy-ry;bx=cx;by=cy-ry-18;lx=cx;ly=by;tf='translate(-50%,-100%)'; }
+    else if(a.side==='right'){ ax=cx+rx;ay=cy;bx=cx+rx+18;by=cy;lx=bx;ly=cy;tf='translateY(-50%)'; }
+    else { ax=cx-rx;ay=cy;bx=cx-rx-18;by=cy;lx=bx;ly=cy;tf='translate(-100%,-50%)'; }
+    svg.insertAdjacentHTML('beforeend',`<g filter="url(#rough)"><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${a.color}" stroke-width="3" stroke-linecap="round"/></g>`);
+    const d=document.createElement('div'); d.className='cl'; d.style.color=a.color; d.style.left=lx+'px'; d.style.top=ly+'px'; d.style.transform=tf; d.textContent=a.text; labels.appendChild(d);
+  });
+}
+document.getElementById('tourDismiss').onclick=()=>{ SEEN.add(CURVIEW); saveSeen(); drawTour(); };
+document.getElementById('reTour').onclick=()=>{ SEEN.clear(); saveSeen(); mask.classList.remove('on'); drawTour(); };
+let _tourRaf=0;
+const scheduleTour=()=>{ if(_tourRaf) return; _tourRaf=requestAnimationFrame(()=>{ _tourRaf=0; drawTour(); }); };
+addEventListener('resize',scheduleTour);
+addEventListener('scroll',scheduleTour,true);   // 跟著捲動 / overflow 重畫
+drawTour();
 </script>
 </body>
 </html>

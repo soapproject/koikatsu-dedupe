@@ -52,7 +52,8 @@ async fn stats(db: String, mode: String) -> serde_json::Value {
     tauri::async_runtime::spawn_blocking(move || {
         let g = core::list_groups(Path::new(&db), &mode, usize::MAX);
         let dup: usize = g.iter().map(|x| x.files.len()).sum();
-        serde_json::json!({ "groups": g.len(), "dup_files": dup })
+        let synced = core::mode_hashed(Path::new(&db), &mode);
+        serde_json::json!({ "groups": g.len(), "dup_files": dup, "synced": synced })
     })
     .await
     .unwrap_or_else(|_| serde_json::json!({ "groups": 0, "dup_files": 0 }))

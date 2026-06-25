@@ -36,6 +36,7 @@ pub struct FileEntry {
     pub name: String,
     pub path: String,
     pub size: u64,
+    pub mtime: f64, // unix seconds; used by "auto: keep newest" in the UI
 }
 
 #[derive(Serialize)]
@@ -397,7 +398,7 @@ pub fn list_groups(db: &Path, mode: &str, limit: usize) -> Vec<Group> {
     let mut out = Vec::new();
     for h in hashes {
         let mut s = match conn
-            .prepare(&format!("SELECT path,size FROM files WHERE {col}=? ORDER BY path", col = col))
+            .prepare(&format!("SELECT path,size,mtime FROM files WHERE {col}=? ORDER BY path", col = col))
         {
             Ok(s) => s,
             Err(_) => continue,
@@ -406,12 +407,13 @@ pub fn list_groups(db: &Path, mode: &str, limit: usize) -> Vec<Group> {
             let rows = match s.query_map(params![h], |r| {
                 let path: String = r.get(0)?;
                 let size: i64 = r.get(1)?;
+                let mtime: f64 = r.get(2)?;
                 let name = Path::new(&path)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
-                Ok(FileEntry { name, path, size: size as u64 })
+                Ok(FileEntry { name, path, size: size as u64, mtime })
             }) {
                 Ok(rows) => rows,
                 Err(_) => continue,
@@ -515,6 +517,25 @@ pub fn card_strings(path: &Path) -> Vec<String> {
     flush(&mut cur, &mut out);
     out.truncate(400); // cap noisy/large cards
     out
+}
+
+/// Has this mode's hashing run at all? Lets the UI tell "0 dup groups" (synced,
+/// no duplicates) apart from "this mode isn't built yet" (switch modes without a
+/// matching sync). char fills char_len for every file; byte fills head_hash for
+/// any size-collision (always present in a pool that has duplicates).
+pub fn mode_hashed(db: &Path, mode: &str) -> bool {
+    let conn = match open_db(db) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let col = if mode == "char" { "char_len" } else { "head_hash" };
+    conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM files WHERE {col} IS NOT NULL)", col = col),
+        [],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|x| x != 0)
+    .unwrap_or(false)
 }
 
 /// Count top-level pngs using free dir-entry file_type (no stat per file).
