@@ -424,9 +424,16 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 // ---------- Tauri 桌面後端（純 Rust，無 server） ----------
 if(window.__TAURI__){
   const T=window.__TAURI__, invoke=T.core.invoke, toUrl=T.core.convertFileSrc;
+  const PHASE={scan:'掃描',head:'雜湊·head',full:'雜湊·full','char-scan':'解析角色資料',char:'雜湊·角色資料'};
+  T.event.listen('sync-progress',e=>{               // 後端串流進度 → 即時更新條
+    const p=e.payload, name=PHASE[p.phase]||p.phase;
+    const ph=document.getElementById('syncPhase'), bar=document.getElementById('syncBar');
+    if(p.total>0){ ph.textContent=`[${name}] ${p.done}/${p.total}`; bar.style.width=Math.round(p.done/p.total*100)+'%'; }
+    else { ph.textContent=`[${name}] ${p.done}…`; }
+  });
   async function refreshRootStatus(){
+    const s=document.getElementById('rootStatus'); s.className='cfg-status'; s.textContent='計算中…';
     try{ const n=await invoke('count_pngs',{root:cfgRoot.value});
-      const s=document.getElementById('rootStatus');
       s.className='cfg-status '+(n>0?'ok':'bad');
       s.textContent=(n>0?'✓ 資料夾存在 · ':'✗ 找不到 png · ')+n+' 個 png';
     }catch(e){}
@@ -454,7 +461,7 @@ if(window.__TAURI__){
           bar=document.getElementById('syncBar'),btn=document.getElementById('btnSync');
     if(!cfgRoot.value){ toast('先選卡片資料夾'); return; }
     const full=document.getElementById('fullScan').checked;
-    btn.disabled=true; ph.textContent=`[sync] ${MODE==='char'?'解析角色資料':'掃描+雜湊'}${full?'·完整重建':''}…`; bar.style.width='40%';
+    btn.disabled=true; ph.textContent=`[sync] 啟動${full?'·完整重建':''}…`; bar.style.width='0%';
     log.textContent='invoke(sync) …\n';
     try{
       const s=await invoke('sync',{root:cfgRoot.value, db:cfgDb.value, mode:MODE, full});

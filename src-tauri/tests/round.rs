@@ -32,7 +32,7 @@ fn round_on_testdata() {
     let db = tmp.join("test.sqlite");
 
     // 1) byte sync -> 3 dup groups
-    let r = app_lib::core::sync(&root, &db, "byte", false).unwrap();
+    let r = app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap();
     assert_eq!(r.groups, 3, "expected 3 byte groups, got {}", r.groups);
 
     // 2) list groups
@@ -52,7 +52,7 @@ fn round_on_testdata() {
     assert_eq!(clen, 116364, "char block length parser");
 
     // advanced (char-data) mode also finds the 3 dup groups on this fixture
-    let rc = app_lib::core::sync(&root, &db, "char", false).unwrap();
+    let rc = app_lib::core::sync(&root, &db, "char", false, &mut |_| {}).unwrap();
     assert_eq!(rc.groups, 3, "expected 3 char groups, got {}", rc.groups);
     assert_eq!(app_lib::core::list_groups(&db, "char", 100).len(), 3);
 
@@ -64,7 +64,7 @@ fn round_on_testdata() {
     assert!(freed > 0);
 
     // 4) re-sync -> 0 dup groups
-    let r2 = app_lib::core::sync(&root, &db, "byte", false).unwrap();
+    let r2 = app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap();
     assert_eq!(r2.groups, 0, "expected 0 groups after dedup, got {}", r2.groups);
 
     // 5) 4 files remain (3 kept + 1 unique)
@@ -105,8 +105,8 @@ fn large_nonascii_round() {
     let db = tmp.join("large.sqlite");
 
     // one big dup pair -> 1 group in both modes
-    assert_eq!(app_lib::core::sync(&root, &db, "byte", false).unwrap().groups, 1);
-    assert_eq!(app_lib::core::sync(&root, &db, "char", false).unwrap().groups, 1);
+    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap().groups, 1);
+    assert_eq!(app_lib::core::sync(&root, &db, "char", false, &mut |_| {}).unwrap().groups, 1);
 
     let groups = app_lib::core::list_groups(&db, "byte", 10);
     assert_eq!(groups.len(), 1);
@@ -118,5 +118,5 @@ fn large_nonascii_round() {
     let (deleted, freed, errors) = app_lib::core::delete_files(&root, &db, &[target]);
     assert_eq!(deleted, 1, "non-ASCII delete failed: {:?}", errors);
     assert!(freed > 0);
-    assert_eq!(app_lib::core::sync(&root, &db, "byte", false).unwrap().groups, 0);
+    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap().groups, 0);
 }

@@ -1,6 +1,7 @@
 //! Pure dedup logic on a SQLite store (same schema as the Python dedupe.py, so
 //! the GUI and CLI can share one dedupe.sqlite). Scan top-level pngs, two-tier
 //! xxhash (head 1MB -> full) on size-collisions, group by full_hash, delete.
+//! Advanced mode hashes the appended Koikatsu block instead (char_len -> char_hash).
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -9,7 +10,10 @@ use std::fs;
 use std::hash::Hasher;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::time::Instant;
 use twox_hash::XxHash64;
+
+const HEAD: u64 = 1 << 20; // 1 MB
 
 fn group_col(mode: &str) -> &'static str {
     if mode == "char" {
@@ -19,7 +23,13 @@ fn group_col(mode: &str) -> &'static str {
     }
 }
 
-const HEAD: u64 = 1 << 20; // 1 MB
+/// Progress tick emitted during a long sync so the UI can show it (not freeze).
+#[derive(Clone, Serialize)]
+pub struct Progress {
+    pub phase: String, // "scan" | "head" | "full" | "char-scan" | "char"
+    pub done: u64,
+    pub total: u64, // 0 = unknown (indeterminate)
+}
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -148,13 +158,20 @@ fn hash_char_block(path: &Path, offset: u64) -> std::io::Result<String> {
 }
 
 /// top-level pngs only -> INSERT OR IGNORE; prune rows whose file vanished.
-fn scan(conn: &mut Connection, root: &Path) -> rusqlite::Result<(i64, i64)> {
+/// Uses dir-entry file_type (free on Windows) to avoid a stat per entry; only
+/// the kept pngs get a metadata() call (needed for size/mtime).
+fn scan(conn: &mut Connection, root: &Path, on: &mut dyn FnMut(Progress)) -> rusqlite::Result<(i64, i64)> {
     let mut seen: Vec<(String, i64, f64)> = Vec::new();
     let mut seen_set: HashSet<String> = HashSet::new();
+    let mut last = Instant::now();
     if let Ok(rd) = fs::read_dir(root) {
         for e in rd.flatten() {
             let p = e.path();
-            if !p.is_file() || !is_png(&p) {
+            if !is_png(&p) {
+                continue;
+            }
+            // file_type() is free from the directory enumeration on Windows
+            if !e.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
             let md = match e.metadata() {
@@ -170,8 +187,14 @@ fn scan(conn: &mut Connection, root: &Path) -> rusqlite::Result<(i64, i64)> {
             let path = p.to_string_lossy().to_string();
             seen_set.insert(path.clone());
             seen.push((path, md.len() as i64, mtime));
+            if last.elapsed().as_millis() >= 150 {
+                on(Progress { phase: "scan".into(), done: seen.len() as u64, total: 0 });
+                last = Instant::now();
+            }
         }
     }
+    on(Progress { phase: "scan".into(), done: seen.len() as u64, total: seen.len() as u64 });
+
     let tx = conn.transaction()?;
     let mut new = 0i64;
     {
@@ -199,111 +222,93 @@ fn scan(conn: &mut Connection, root: &Path) -> rusqlite::Result<(i64, i64)> {
     Ok((new, pruned))
 }
 
-fn hash_phase(conn: &mut Connection) -> rusqlite::Result<()> {
-    // tier1: head hash for size-collision candidates
+/// run a hashing tier: collect candidate paths, hash each, report progress.
+fn run_tier(
+    conn: &mut Connection,
+    select_sql: &str,
+    update_sql: &str,
+    phase: &str,
+    hash: impl Fn(&Path) -> Option<String>,
+    on: &mut dyn FnMut(Progress),
+) -> rusqlite::Result<()> {
     let todo: Vec<String> = {
-        let mut s = conn.prepare(
-            "SELECT path FROM files WHERE head_hash IS NULL
-             AND size IN (SELECT size FROM files GROUP BY size HAVING COUNT(*)>1)",
-        )?;
+        let mut s = conn.prepare(select_sql)?;
         let rows = s.query_map([], |r| r.get::<_, String>(0))?;
         let v: Vec<String> = rows.flatten().collect();
         v
     };
+    let total = todo.len() as u64;
+    if total == 0 {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
     {
-        let tx = conn.transaction()?;
-        {
-            let mut upd = tx.prepare("UPDATE files SET head_hash=? WHERE path=?")?;
-            for path in &todo {
-                if let Ok(h) = hash_file(Path::new(path), Some(HEAD)) {
-                    upd.execute(params![h, path])?;
-                }
+        let mut upd = tx.prepare(update_sql)?;
+        let mut last = Instant::now();
+        for (i, path) in todo.iter().enumerate() {
+            if let Some(h) = hash(Path::new(path)) {
+                upd.execute(params![h, path])?;
+            }
+            if last.elapsed().as_millis() >= 150 {
+                on(Progress { phase: phase.into(), done: (i + 1) as u64, total });
+                last = Instant::now();
             }
         }
-        tx.commit()?;
     }
-    // if file fits in HEAD, head hash IS the full hash
+    tx.commit()?;
+    on(Progress { phase: phase.into(), done: total, total });
+    Ok(())
+}
+
+fn hash_phase(conn: &mut Connection, on: &mut dyn FnMut(Progress)) -> rusqlite::Result<()> {
+    run_tier(
+        conn,
+        "SELECT path FROM files WHERE head_hash IS NULL
+         AND size IN (SELECT size FROM files GROUP BY size HAVING COUNT(*)>1)",
+        "UPDATE files SET head_hash=? WHERE path=?",
+        "head",
+        |p| hash_file(p, Some(HEAD)).ok(),
+        on,
+    )?;
     conn.execute(
         "UPDATE files SET full_hash=head_hash
          WHERE full_hash IS NULL AND head_hash IS NOT NULL AND size<=?",
         params![HEAD as i64],
     )?;
-    // tier2: full hash where (size, head_hash) collides
-    let todo2: Vec<String> = {
-        let mut s = conn.prepare(
-            "SELECT path FROM files WHERE full_hash IS NULL AND head_hash IS NOT NULL
-             AND (size,head_hash) IN (
-                SELECT size,head_hash FROM files WHERE head_hash IS NOT NULL
-                GROUP BY size,head_hash HAVING COUNT(*)>1)",
-        )?;
-        let rows = s.query_map([], |r| r.get::<_, String>(0))?;
-        let v: Vec<String> = rows.flatten().collect();
-        v
-    };
-    {
-        let tx = conn.transaction()?;
-        {
-            let mut upd = tx.prepare("UPDATE files SET full_hash=? WHERE path=?")?;
-            for path in &todo2 {
-                if let Ok(h) = hash_file(Path::new(path), None) {
-                    upd.execute(params![h, path])?;
-                }
-            }
-        }
-        tx.commit()?;
-    }
-    Ok(())
+    run_tier(
+        conn,
+        "SELECT path FROM files WHERE full_hash IS NULL AND head_hash IS NOT NULL
+         AND (size,head_hash) IN (
+            SELECT size,head_hash FROM files WHERE head_hash IS NOT NULL
+            GROUP BY size,head_hash HAVING COUNT(*)>1)",
+        "UPDATE files SET full_hash=? WHERE path=?",
+        "full",
+        |p| hash_file(p, None).ok(),
+        on,
+    )
 }
 
 /// Advanced mode: tier1 = char_len (cheap chunk-header walk), tier2 = char_hash
 /// of the appended block for char_len-collisions. char_len 0 = no KK block.
-fn hash_phase_char(conn: &mut Connection) -> rusqlite::Result<()> {
-    // tier1: char_len for every file missing it
-    let todo: Vec<String> = {
-        let mut s = conn.prepare("SELECT path FROM files WHERE char_len IS NULL")?;
-        let rows = s.query_map([], |r| r.get::<_, String>(0))?;
-        let v: Vec<String> = rows.flatten().collect();
-        v
-    };
-    {
-        let tx = conn.transaction()?;
-        {
-            let mut upd = tx.prepare("UPDATE files SET char_len=? WHERE path=?")?;
-            for path in &todo {
-                let clen = png_char_block(Path::new(path))
-                    .map(|(_, l)| l as i64)
-                    .unwrap_or(0);
-                upd.execute(params![clen, path])?;
-            }
-        }
-        tx.commit()?;
-    }
-    // tier2: char_hash where char_len collides
-    let todo2: Vec<String> = {
-        let mut s = conn.prepare(
-            "SELECT path FROM files WHERE char_hash IS NULL AND char_len > 0
-             AND char_len IN (SELECT char_len FROM files WHERE char_len > 0
-                              GROUP BY char_len HAVING COUNT(*)>1)",
-        )?;
-        let rows = s.query_map([], |r| r.get::<_, String>(0))?;
-        let v: Vec<String> = rows.flatten().collect();
-        v
-    };
-    {
-        let tx = conn.transaction()?;
-        {
-            let mut upd = tx.prepare("UPDATE files SET char_hash=? WHERE path=?")?;
-            for path in &todo2 {
-                if let Some((off, _)) = png_char_block(Path::new(path)) {
-                    if let Ok(h) = hash_char_block(Path::new(path), off) {
-                        upd.execute(params![h, path])?;
-                    }
-                }
-            }
-        }
-        tx.commit()?;
-    }
-    Ok(())
+fn hash_phase_char(conn: &mut Connection, on: &mut dyn FnMut(Progress)) -> rusqlite::Result<()> {
+    run_tier(
+        conn,
+        "SELECT path FROM files WHERE char_len IS NULL",
+        "UPDATE files SET char_len=? WHERE path=?",
+        "char-scan",
+        |p| Some(png_char_block(p).map(|(_, l)| l).unwrap_or(0).to_string()),
+        on,
+    )?;
+    run_tier(
+        conn,
+        "SELECT path FROM files WHERE char_hash IS NULL AND char_len > 0
+         AND char_len IN (SELECT char_len FROM files WHERE char_len > 0
+                          GROUP BY char_len HAVING COUNT(*)>1)",
+        "UPDATE files SET char_hash=? WHERE path=?",
+        "char",
+        |p| png_char_block(p).and_then(|(off, _)| hash_char_block(p, off).ok()),
+        on,
+    )
 }
 
 fn stats(conn: &Connection, col: &str) -> rusqlite::Result<(i64, i64, i64)> {
@@ -330,16 +335,23 @@ fn stats(conn: &Connection, col: &str) -> rusqlite::Result<(i64, i64, i64)> {
 }
 
 /// mode: "byte" (full_hash) or "char" (char_hash). full: wipe table & rebuild.
-pub fn sync(root: &Path, db: &Path, mode: &str, full: bool) -> rusqlite::Result<SyncResult> {
+/// `on` receives progress ticks (throttled ~150ms) for the UI.
+pub fn sync(
+    root: &Path,
+    db: &Path,
+    mode: &str,
+    full: bool,
+    on: &mut dyn FnMut(Progress),
+) -> rusqlite::Result<SyncResult> {
     let mut conn = open_db(db)?;
     if full {
         conn.execute("DELETE FROM files", [])?;
     }
-    let (new, pruned) = scan(&mut conn, root)?;
+    let (new, pruned) = scan(&mut conn, root, on)?;
     if mode == "char" {
-        hash_phase_char(&mut conn)?;
+        hash_phase_char(&mut conn, on)?;
     } else {
-        hash_phase(&mut conn)?;
+        hash_phase(&mut conn, on)?;
     }
     let (total, groups, dup_files) = stats(&conn, group_col(mode))?;
     Ok(SyncResult { total, groups, dup_files, new, pruned })
@@ -430,13 +442,14 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
     (deleted, freed, errors)
 }
 
+/// Count top-level pngs using free dir-entry file_type (no stat per file).
 pub fn count_pngs(root: &Path) -> usize {
     fs::read_dir(root)
         .map(|rd| {
             rd.flatten()
                 .filter(|e| {
-                    let p = e.path();
-                    p.is_file() && is_png(&p)
+                    e.file_type().map(|t| t.is_file()).unwrap_or(false)
+                        && is_png(&e.path())
                 })
                 .count()
         })
