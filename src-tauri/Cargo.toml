@@ -26,3 +26,4 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 twox-hash = "1.6"
 rusqlite = { version = "0.32", features = ["bundled"] }
+trash = "5"

@@ -439,7 +439,8 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
             .unwrap_or(name);
         let p = root.join(base);
         match fs::metadata(&p) {
-            Ok(md) => match fs::remove_file(&p) {
+            Ok(md) => match trash::delete(&p) {
+                // move to OS Recycle Bin (recoverable), not a hard delete
                 Ok(_) => {
                     freed += md.len();
                     deleted += 1;

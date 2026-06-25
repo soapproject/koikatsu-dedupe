@@ -132,7 +132,7 @@
         <label>完整掃描</label>
         <label class="radio"><input type="checkbox" id="fullScan"> 重建整表（清空後重算，忽略既有雜湊）</label>
       </div>
-      <div class="cfg-hint">重複會搬進 <code id="cfgDup">./testdata/_duplicated/</code> 供複檢 · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
+      <div class="cfg-hint">選取的卡確認後<b>移到回收桶（可復原）</b> · 只掃頂層、不進子夾 · Tauri 用原生選擇器</div>
     </div>
     <div class="card-panel">
       <div class="phase-tag" id="syncPhase">待命</div>
@@ -193,15 +193,15 @@
   <!-- ============ 4. SUMMARY ============ -->
   <section id="v-summary" class="view">
     <h2>確認刪除</h2>
-    <p class="sub">以下是這一批你標記要刪除的卡。</p>
+    <p class="sub">以下是這一批你標記的卡，確認後移到回收桶（可從回收桶還原）。</p>
     <div class="card-panel">
-      <div class="total">共 <b id="sumCount">0</b> 張，可釋出約 <b id="sumSize">0 MB</b></div>
+      <div class="total">共 <b id="sumCount">0</b> 張，約 <b id="sumSize">0 MB</b>（移到回收桶）</div>
       <div style="max-height:340px;overflow:auto">
         <table><thead><tr><th>組</th><th>檔名</th><th>大小</th></tr></thead>
         <tbody id="sumRows"></tbody></table>
       </div>
       <div style="margin-top:18px;display:flex;gap:12px">
-        <button class="danger" id="btnDelete">刪除這些卡</button>
+        <button class="danger" id="btnDelete">移到回收桶</button>
         <button class="ghost" id="btnBackReview">← 回去再看</button>
       </div>
     </div>
@@ -284,18 +284,14 @@ function renderRecent(list){
   if(!list||!list.length) return;
   row.innerHTML='<span class="lbl">最近：</span>';
   list.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p;
-    c.title='點擊載入'; c.onclick=()=>{cfgRoot.value=p;refreshDup();saveCfg();};
+    c.title='點擊載入'; c.onclick=()=>{cfgRoot.value=p;saveCfg();};
     row.appendChild(c);});
 }
-function refreshDup(){
-  document.getElementById('cfgDup').textContent =
-    cfgRoot.value.replace(/[\\/]+$/,'') + '/_duplicated/';
-}
-cfgRoot.addEventListener('input',()=>{refreshDup();saveCfg();});
+cfgRoot.addEventListener('input',saveCfg);
 cfgDb.addEventListener('input',saveCfg);
 document.getElementById('btnBrowseRoot').onclick=()=>{
   // Tauri: const dir = await open({directory:true}); cfgRoot.value = dir;
-  cfgRoot.value='./testdata'; refreshDup(); saveCfg();
+  cfgRoot.value='./testdata'; saveCfg();
   const s=document.getElementById('rootStatus');
   s.className='cfg-status ok'; s.textContent='✓ 資料夾存在 · 7 個 png（mock）';
 };
@@ -307,7 +303,7 @@ document.getElementById('btnBrowseDb').onclick=()=>{
   const c=loadCfg();
   if(c.root) cfgRoot.value=c.root;
   if(c.db) cfgDb.value=c.db;
-  refreshDup(); renderRecent(c.recent);
+  renderRecent(c.recent);
 })();
 
 // ---------- 1. SYNC（假進度） ----------
@@ -413,8 +409,8 @@ document.getElementById('btnBackReview').onclick=()=>{gi=BATCH.length-1;renderGr
 document.getElementById('btnBackSync').onclick=()=>show('sync');
 document.getElementById('btnDelete').onclick=()=>{
   const n=document.getElementById('sumCount').textContent;
-  toast(`已刪除 ${n} 張，其餘原地保留 ✓`);
-  // ponytail: GUI 模型不需 move/_duplicated/restore — 直接刪選中的，未選的本就沒動
+  toast(`已移到回收桶 ${n} 張 ✓`);
+  // ponytail: GUI 模型不需 move/_duplicated/restore — 刪選中的（→回收桶），未選的本就沒動
   setTimeout(()=>{show('setup');},1400);
 };
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
@@ -447,11 +443,11 @@ if(window.__TAURI__){
   cfgRoot.addEventListener('input',refreshRootStatus);
   modeHooks.push(refreshAvail);
   (async()=>{                                   // 預設索引檔（app data dir）
-    if(!loadCfg().db){ try{ cfgDb.value=await invoke('default_db'); refreshDup(); saveCfg(); }catch(e){} }
+    if(!loadCfg().db){ try{ cfgDb.value=await invoke('default_db'); saveCfg(); }catch(e){} }
     refreshRootStatus(); refreshAvail();
   })();
   document.getElementById('btnBrowseRoot').onclick=async()=>{
-    const d=await invoke('pick_folder'); if(d){ cfgRoot.value=d; refreshDup(); saveCfg(); refreshRootStatus(); }
+    const d=await invoke('pick_folder'); if(d){ cfgRoot.value=d; saveCfg(); refreshRootStatus(); }
   };
   document.getElementById('btnBrowseDb').onclick=async()=>{
     const f=await invoke('pick_save_db'); if(f){ cfgDb.value=f; saveCfg(); }
@@ -486,7 +482,7 @@ if(window.__TAURI__){
     const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
     if(!names.length){ toast('沒有選取任何卡'); return; }
     try{ const res=await invoke('delete_files',{root:cfgRoot.value, db:cfgDb.value, names});
-      let msg=`已刪除 ${res.deleted} 張，釋出 ${(res.freed/1048576).toFixed(2)} MB`;
+      let msg=`已移到回收桶 ${res.deleted} 張（${(res.freed/1048576).toFixed(2)} MB）`;
       if(res.errors&&res.errors.length) msg+=`（${res.errors.length} 個錯誤）`;
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
     }catch(e){ toast('刪除失敗：'+e); }

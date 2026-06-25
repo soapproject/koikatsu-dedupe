@@ -23,7 +23,7 @@ automatic prune of vanished files) keeps re-syncs incremental.
    **Full scan** rebuilds the whole index from scratch.
 3. Review each duplicate group — cards are shown enlarged with filename + size.
    Multi-select the ones to delete and advance through the batch.
-4. Confirm to delete. The index updates; the kept card stays in place.
+4. Confirm — selected cards are moved to the Recycle Bin (recoverable); the kept card stays in place.
 
 Only the top level of the chosen folder is scanned (subfolders, including the app's
 own output, are ignored). The character-data parser is byte-level and never decodes
