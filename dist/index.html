@@ -850,11 +850,14 @@ if(window.__TAURI__){
   document.getElementById('btnDelete').onclick=async()=>{
     const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
     if(!names.length){ toast(t('toast.none_selected')); return; }
+    const btn=document.getElementById('btnDelete'), label=btn.textContent;
+    btn.disabled=true; btn.textContent=t('summary.deleting',{n:names.length});  // 立刻給回饋：刪大量檔時後端要跑數秒，否則 UI 看似卡死
     try{ const res=await invoke('delete_files',{root:cfgRoot.value, db:cfgDb.value, names});
       let msg=t('toast.deleted_size',{n:res.deleted, mb:(res.freed/1048576).toFixed(2)});
       if(res.errors&&res.errors.length) msg+=t('toast.delete_errors',{n:res.errors.length});
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
     }catch(e){ toast(t('toast.delete_fail',{e}), true); }
+    finally{ btn.disabled=false; btn.textContent=label; }
   };
   // ⚡ 全自動：抓「一次看幾組」設定的組數，每組留 mtime 最新的一張，其餘進步驟4 摘要等你確認刪除
   async function autoRun(){

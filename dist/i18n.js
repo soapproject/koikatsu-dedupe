@@ -185,6 +185,7 @@
       'summary.col_name': '檔名',
       'summary.col_size': '大小',
       'summary.delete': '確認刪除',
+      'summary.deleting': '刪除中…（{n} 張）',
       'summary.back': '← 回去再看',
 
       'toast.deleted': { other: '已刪除 {n} 張 ✓' },
@@ -344,6 +345,7 @@
       'summary.col_name': 'Filename',
       'summary.col_size': 'Size',
       'summary.delete': 'Confirm delete',
+      'summary.deleting': 'Deleting… ({n})',
       'summary.back': '← Back to review',
 
       'toast.deleted': { one: 'Deleted {n} card ✓', other: 'Deleted {n} cards ✓' },
@@ -503,6 +505,7 @@
       'summary.col_name': '文件名',
       'summary.col_size': '大小',
       'summary.delete': '确认删除',
+      'summary.deleting': '删除中…（{n} 张）',
       'summary.back': '← 回去再看',
 
       'toast.deleted': { other: '已删除 {n} 张 ✓' },
@@ -662,6 +665,7 @@
       'summary.col_name': 'ファイル名',
       'summary.col_size': 'サイズ',
       'summary.delete': '削除を確認',
+      'summary.deleting': '削除中…（{n} 枚）',
       'summary.back': '← 確認に戻る',
 
       'toast.deleted': { other: '{n} 枚を削除 ✓' },
@@ -821,6 +825,7 @@
       'summary.col_name': '파일명',
       'summary.col_size': '크기',
       'summary.delete': '삭제 확인',
+      'summary.deleting': '삭제 중…（{n}장）',
       'summary.back': '← 확인으로 돌아가기',
 
       'toast.deleted': { other: '{n}장 삭제됨 ✓' },
@@ -980,6 +985,7 @@
       'summary.col_name': 'Имя файла',
       'summary.col_size': 'Размер',
       'summary.delete': 'Подтвердить удаление',
+      'summary.deleting': 'Удаление… ({n})',
       'summary.back': '← Назад к проверке',
 
       'toast.deleted': { one: 'Удалена {n} карта ✓', few: 'Удалено {n} карты ✓', many: 'Удалено {n} карт ✓' },
@@ -1139,6 +1145,7 @@
       'summary.col_name': 'Nombre de archivo',
       'summary.col_size': 'Tamaño',
       'summary.delete': 'Confirmar eliminación',
+      'summary.deleting': 'Eliminando… ({n})',
       'summary.back': '← Volver a revisar',
 
       'toast.deleted': { one: '{n} tarjeta borrada ✓', other: '{n} tarjetas borradas ✓' },
