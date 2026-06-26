@@ -97,6 +97,21 @@ fn default_db(app: tauri::AppHandle) -> String {
     dir.join("dedupe.sqlite").to_string_lossy().to_string()
 }
 
+/// Mirror the GUI's last-used root/db/mode to app_data_dir/config.json so the
+/// headless `kdedupe` CLI (and AI agents) can discover the same library without
+/// being told the paths. localStorage lives inside WebView2 and isn't readable
+/// from outside; this plain JSON file is.
+#[tauri::command]
+fn save_cfg(app: tauri::AppHandle, root: String, db: String, mode: String) {
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let body = serde_json::json!({ "root": root, "db": db, "mode": mode });
+        if let Ok(s) = serde_json::to_vec_pretty(&body) {
+            let _ = std::fs::write(dir.join("config.json"), s);
+        }
+    }
+}
+
 #[tauri::command]
 async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -149,6 +164,7 @@ pub fn run() {
             copy_to_game,
             count_pngs,
             default_db,
+            save_cfg,
             pick_folder,
             pick_save_db
         ])

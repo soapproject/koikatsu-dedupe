@@ -12,6 +12,9 @@ use std::{env, fs};
 fn kdedupe(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_kdedupe"))
         .args(args)
+        // Isolate from any real GUI config.json so --root/--db/--mode fallback
+        // can't leak the developer's actual library into the test.
+        .env("KDEDUPE_CONFIG", "__kdedupe_no_such_config__.json")
         .output()
         .expect("run kdedupe")
 }
@@ -102,4 +105,39 @@ fn cli_round_on_testdata() {
         String::from_utf8_lossy(&v.stdout)
     );
     assert_eq!(kdedupe(&["--help"]).status.code(), Some(0), "--help exit");
+}
+
+/// --root/--db/--mode fall back to the GUI's config.json when the flag is omitted.
+/// Hermetic: writes its own config and points $KDEDUPE_CONFIG at it.
+#[test]
+fn cli_config_fallback() {
+    let tmp = env::temp_dir().join("kdedupe_cfg_test");
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+    let cfg = tmp.join("config.json");
+    fs::write(
+        &cfg,
+        r#"{"root":"R:\\some\\root","db":"R:\\some\\lib.sqlite","mode":"char"}"#,
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_kdedupe"))
+        .args(["config"])
+        .env("KDEDUPE_CONFIG", &cfg)
+        .output()
+        .expect("run kdedupe");
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["resolved"]["mode"], "char", "mode from config");
+    assert_eq!(v["resolved"]["db"], "R:\\some\\lib.sqlite", "db from config");
+    assert_eq!(v["resolved"]["root"], "R:\\some\\root", "root from config");
+
+    // explicit flag still wins over the saved config
+    let out2 = Command::new(env!("CARGO_BIN_EXE_kdedupe"))
+        .args(["config", "--mode", "byte"])
+        .env("KDEDUPE_CONFIG", &cfg)
+        .output()
+        .expect("run kdedupe");
+    let v2: Value = serde_json::from_slice(&out2.stdout).unwrap();
+    assert_eq!(v2["resolved"]["mode"], "byte", "flag overrides config");
 }

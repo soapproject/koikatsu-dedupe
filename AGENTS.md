@@ -12,11 +12,13 @@ after `cargo build --release`.
 
 ```sh
 kdedupe describe      # JSON manifest: every command, its flags/types/defaults, output shape, default db path
+kdedupe config        # what root/db/mode resolved to (and from which config.json) — confirm before scanning/deleting
 kdedupe --help        # human-readable
 ```
 
-Always run `describe` before driving — it reports the resolved default db path and
-the exact argument schema, so you never have to guess.
+Always run `describe` + `config` before driving — `describe` reports the argument
+schema, `config` reports the actual library the GUI last used, so you never have to
+guess or be told the paths.
 
 ## Safe workflow
 
@@ -28,7 +30,10 @@ kdedupe delete --root "D:\cards" --apply NAME1 ... # actually deletes (-> Recycl
 ```
 
 - `--mode byte` = byte-identical files. `--mode char` = same character, different cover art.
-- `--db` defaults to the GUI's library (`%APPDATA%\io.github.soapproject.koikatsu-dedupe\dedupe.sqlite`); pass `--db` to target another index.
+- `--root`, `--db` and `--mode` default to the GUI's **last-used** values (mirrored to
+  `%APPDATA%\io.github.soapproject.koikatsu-dedupe\config.json`); omit them to act on the
+  library the user is actually working on, or pass them to override. Falls back to
+  `dedupe.sqlite` / `byte` if no config exists. `kdedupe config` shows what resolved.
 
 ## Choosing which file to keep
 

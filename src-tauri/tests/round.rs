@@ -96,6 +96,30 @@ fn round_on_testdata() {
     assert_eq!(left, 4, "expected 4 files left, got {}", left);
 }
 
+/// A read-only card must still delete. On a NAS (no Recycle Bin) `trash` no-ops,
+/// so delete falls through to `fs::remove_file`, which on Windows REFUSES
+/// read-only files ("Access is denied"). Regression for the production bug where
+/// 25 read-only cards could never be deleted.
+#[test]
+fn delete_readonly_file() {
+    let tmp = std::env::temp_dir().join("dedup_ro_rs");
+    let _ = fs::remove_dir_all(&tmp);
+    let root = tmp.join("root");
+    fs::create_dir_all(&root).unwrap();
+    let f = root.join("readonly.png");
+    fs::write(&f, b"x").unwrap();
+    let mut perm = fs::metadata(&f).unwrap().permissions();
+    perm.set_readonly(true);
+    fs::set_permissions(&f, perm).unwrap();
+
+    let db = tmp.join("ro.sqlite");
+    let (deleted, _freed, errors) =
+        app_lib::core::delete_files(&root, &db, &["readonly.png".to_string()]);
+    assert!(errors.is_empty(), "read-only delete errored: {:?}", errors);
+    assert_eq!(deleted, 1);
+    assert!(!f.exists(), "read-only file should be gone");
+}
+
 /// Large modded cards, one with a non-ASCII (CJK) filename: prove the path
 /// round-trips through scan -> hash -> group -> delete in both modes.
 #[test]

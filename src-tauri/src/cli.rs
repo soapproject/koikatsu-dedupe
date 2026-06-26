@@ -26,10 +26,13 @@ COMMANDS:
   strings --path PNG                                       readable card strings (JSON)
   count  --root DIR                                         number of top-level pngs
   delete --root DIR [--db P] NAME...                        DRY-RUN; add --apply to delete
+  config                                                    show resolved root/db/mode (JSON)
   describe                                                  machine-readable manifest (JSON)
   --help | --version
 
-Defaults: --mode byte; --db = %APPDATA%/io.github.soapproject.koikatsu-dedupe/dedupe.sqlite
+--root/--db/--mode default to the GUI's last-used values (app_data_dir/config.json)
+when the flag is omitted; run `config` to see what got resolved.
+Defaults if unset: --mode byte; --db = %APPDATA%/io.github.soapproject.koikatsu-dedupe/dedupe.sqlite
 delete is dry-run by default; --apply sends files to the Recycle Bin (recoverable).";
 
 fn parse(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
@@ -55,12 +58,40 @@ fn parse(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
     (pos, flags)
 }
 
-fn default_db() -> PathBuf {
+fn app_data_dir() -> PathBuf {
     // Mirror the GUI's app_data_dir so the CLI hits the same library by default.
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    Path::new(&base)
-        .join("io.github.soapproject.koikatsu-dedupe")
-        .join("dedupe.sqlite")
+    Path::new(&base).join("io.github.soapproject.koikatsu-dedupe")
+}
+
+fn default_db() -> PathBuf {
+    app_data_dir().join("dedupe.sqlite")
+}
+
+/// The GUI mirrors its last-used {root, db, mode} here (see lib.rs `save_cfg`),
+/// so the CLI can default to the same library the user is actually working on.
+/// $KDEDUPE_CONFIG overrides the location (tests point it at a nonexistent file
+/// to stay hermetic).
+fn config_path() -> PathBuf {
+    match std::env::var("KDEDUPE_CONFIG") {
+        Ok(p) => PathBuf::from(p),
+        Err(_) => app_data_dir().join("config.json"),
+    }
+}
+
+/// Missing/garbage file -> empty object.
+fn load_cfg() -> Value {
+    std::fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+fn cfg_str(cfg: &Value, k: &str) -> Option<String> {
+    cfg.get(k)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 fn out(v: Value) {
@@ -73,6 +104,7 @@ fn describe(db: &Path) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "summary": "Headless Koikatsu card deduplicator. Shares dedupe.sqlite with the GUI.",
         "default_db": db.to_string_lossy(),
+        "config_fallback": "--root/--db/--mode default to app_data_dir/config.json (GUI's last-used); run `config` to inspect",
         "modes": ["byte", "char"],
         "safe_workflow": ["scan", "groups", "(agent picks names to delete, keeping 1 per group)", "delete (dry-run)", "delete --apply"],
         "commands": [
@@ -81,7 +113,8 @@ fn describe(db: &Path) -> Value {
             {"name":"stats","args":[{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"}],"output":"{groups,dup_files,synced}"},
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
             {"name":"count","args":[{"name":"--root","required":true,"type":"dir"}],"output":"int"},
-            {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"}
+            {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
+            {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
     })
 }
@@ -111,13 +144,36 @@ pub fn run(argv: &[String]) -> i32 {
 
     let (pos, flags) = parse(argv);
     let cmd = pos.first().map(|s| s.as_str()).unwrap_or("");
-    let db = flags.get("db").map(PathBuf::from).unwrap_or_else(default_db);
-    let mode = flags.get("mode").cloned().unwrap_or_else(|| "byte".into());
+    // Resolution order for db/root/mode: explicit flag -> GUI's saved config -> default.
+    let cfg = load_cfg();
+    let db = flags
+        .get("db")
+        .cloned()
+        .or_else(|| cfg_str(&cfg, "db"))
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db);
+    let mode = flags
+        .get("mode")
+        .cloned()
+        .or_else(|| cfg_str(&cfg, "mode"))
+        .unwrap_or_else(|| "byte".into());
+    // root has no static default; fall back to the GUI's saved root, else error.
+    let need_root = |cmd: &str| -> Result<PathBuf, i32> {
+        flags
+            .get("root")
+            .cloned()
+            .or_else(|| cfg_str(&cfg, "root"))
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                eprintln!("error: {cmd} needs --root (and no saved config root found)");
+                2
+            })
+    };
 
     match cmd {
         "scan" => {
-            let root = match need(&flags, "root", "scan") {
-                Ok(r) => PathBuf::from(r),
+            let root = match need_root("scan") {
+                Ok(r) => r,
                 Err(c) => return c,
             };
             let full = flags.contains_key("full");
@@ -156,16 +212,16 @@ pub fn run(argv: &[String]) -> i32 {
             0
         }
         "count" => {
-            let root = match need(&flags, "root", "count") {
+            let root = match need_root("count") {
                 Ok(r) => r,
                 Err(c) => return c,
             };
-            out(json!(core::count_pngs(Path::new(root))));
+            out(json!(core::count_pngs(&root)));
             0
         }
         "delete" => {
-            let root = match need(&flags, "root", "delete") {
-                Ok(r) => PathBuf::from(r),
+            let root = match need_root("delete") {
+                Ok(r) => r,
                 Err(c) => return c,
             };
             let names: Vec<String> = pos[1..].to_vec();
@@ -185,6 +241,16 @@ pub fn run(argv: &[String]) -> i32 {
                 out(json!({"dry_run":true,"would_delete":names,"count":names.len(),"hint":"re-run with --apply to delete (to Recycle Bin)"}));
                 0
             }
+        }
+        "config" => {
+            // Show what the CLI resolved (and from where) so an agent can confirm
+            // it's pointed at the user's actual library before scanning/deleting.
+            out(json!({
+                "config_file": config_path().to_string_lossy(),
+                "saved": cfg,
+                "resolved": { "root": cfg_str(&cfg, "root"), "db": db.to_string_lossy(), "mode": mode },
+            }));
+            0
         }
         "describe" => {
             out(describe(&db));

@@ -453,9 +453,17 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
         // actually removing the file. Verify; if it's still there, hard-delete it. A NAS keeps
         // its own recycle bin / versioning, so the delete stays recoverable on that side.
         if p.exists() {
-            if let Err(e) = fs::remove_file(&p) {
-                errors.push(format!("{}: {}", name, e));
-                continue;
+            if fs::remove_file(&p).is_err() {
+                // Windows refuses to remove a read-only file (Access denied). Common on
+                // NAS-restored / backup cards — and the NAS path is exactly where `trash`
+                // above no-ops, so we land here. Clear the read-only bit and retry once.
+                let mut perm = md.permissions();
+                perm.set_readonly(false);
+                let _ = fs::set_permissions(&p, perm);
+                if let Err(e) = fs::remove_file(&p) {
+                    errors.push(format!("{}: {}", name, e));
+                    continue;
+                }
             }
         }
         freed += md.len();
