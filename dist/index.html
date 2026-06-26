@@ -121,6 +121,41 @@
   .total b{color:var(--warn)}
   #sumRows tr:hover{background:rgba(122,162,255,.10)}
   .okmark{display:inline-block;margin-left:6px;color:var(--good);font-weight:700;font-size:12px}
+  /* 進階：自動保留優先序 */
+  .mono{font-family:Consolas,monospace;font-size:13px}
+  .advbox{margin-top:16px;border:1px dashed var(--line);border-radius:10px;background:var(--panel2)}
+  .advbox > summary{list-style:none;cursor:pointer;padding:12px 16px;display:flex;align-items:center;gap:8px;font-weight:600;user-select:none}
+  .advbox > summary::-webkit-details-marker{display:none}
+  .advbox .caret{transition:transform .15s;color:var(--dim);font-size:12px}
+  .advbox[open] .caret{transform:rotate(90deg)}
+  .adv-badge{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--accent);border-radius:20px;padding:1px 8px}
+  .adv-body{padding:4px 16px 18px}
+  .prio-head{display:flex;align-items:center;justify-content:space-between;margin:10px 0 6px}
+  .prio-head .t{font-weight:600}
+  .keep-reset{font-size:13px;padding:5px 10px}
+  .keep-explain{margin:0 0 8px;font-size:13px}
+  .prio-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 12px}
+  .prio-row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;transition:transform .18s ease}
+  .prio-row .grip{cursor:grab;color:var(--dim);font-size:16px;padding:0 4px;touch-action:none;user-select:none}
+  .prio-row.drag{opacity:.95;cursor:grabbing;position:relative;z-index:5;transition:none;box-shadow:0 8px 20px rgba(0,0,0,.45)}
+  .prio-row .ord{flex:none;width:22px;height:22px;border-radius:6px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .prio-row .kind{flex:none;font-size:12px;padding:2px 8px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  .prio-row .kind.rx{color:var(--hl);border-color:var(--hl)}
+  .prio-row .label{flex:none;font-weight:600;min-width:78px;font-family:inherit;font-size:14px}
+  .prio-row input.label{padding:6px 8px}
+  .prio-row .pat{flex:1;min-width:120px;padding:6px 8px}
+  .prio-row .pat.bad{border-color:var(--danger);color:var(--danger)}
+  .prio-row .grow{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:var(--panel2);color:var(--dim);border:0;border-radius:0;padding:5px 10px;font-size:13px}
+  .seg button.on{background:var(--accent);color:#fff}
+  .prio-row .x{cursor:pointer;color:var(--dim);background:none;border:0;font-size:18px;padding:0 4px}
+  .prio-row .x:hover{color:var(--danger)}
+  .addbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .addbar .lbl{color:var(--dim);font-size:13px}
+  .addbar .chip{background:var(--panel2);border:1px dashed var(--line);color:var(--txt);border-radius:20px;padding:6px 12px;font-size:13px}
+  .addbar .chip:hover{border-color:var(--accent);border-style:solid}
+  .addbar .chip.rx{color:var(--hl);border-color:var(--hl)}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--good);color:#06210f;padding:12px 22px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.on{opacity:1}
   .toast.err{background:var(--danger);color:#2a0000;cursor:pointer}
@@ -201,6 +236,25 @@
         <button class="ghost" id="btnSyncSkip" disabled data-i18n="sync.skip">下一步 →</button>
       </div>
     </div>
+    <details class="advbox" id="advSec">
+      <summary><span class="caret">▶</span> <span data-i18n="adv.title">進階設定</span>
+        <span class="adv-badge" data-i18n="adv.optional">選用</span></summary>
+      <div class="adv-body">
+        <div class="prio-head">
+          <div class="t" data-i18n="keep.title">自動保留的優先順序</div>
+          <button class="ghost keep-reset" id="keepReset" data-i18n="keep.reset">重設為預設</button>
+        </div>
+        <p class="sub keep-explain" data-i18n="keep.explain">按「⚡ 全自動」時，每組依這份順序決定留哪張：由上往下逐條比，分不出高下才看下一條。可拖 ⠿ 調整。</p>
+        <div class="prio-list" id="prioList"></div>
+        <div class="addbar" id="prioAdd">
+          <span class="lbl" data-i18n="keep.add">＋ 新增規則：</span>
+          <button class="chip" data-add="mtime" data-i18n="keep.preset_mtime">修改時間</button>
+          <button class="chip" data-add="size" data-i18n="keep.preset_size">檔案大小</button>
+          <button class="chip" data-add="namelen" data-i18n="keep.preset_namelen">檔名長度</button>
+          <button class="chip rx" data-add="custom" data-i18n="keep.preset_custom">自訂 regex</button>
+        </div>
+      </div>
+    </details>
   </section>
 
   <!-- ============ 2. SETUP ============ -->
@@ -241,7 +295,7 @@
     <p class="hint" id="grpHint" data-i18n-html="review.hint">點一下你<b style="color:var(--hl)">想刪掉</b>的卡（會亮黃框），沒點的會留著。挑好按「下一組」。（數字鍵 1–9 快速選、← → 換組）</p>
     <div class="grid" id="grpGrid"></div>
     <div class="footer-bar">
-      <button class="ghost" id="btnSelOthers" data-i18n="review.select_others">留第一張、其餘都選</button>
+      <button class="ghost" id="btnSelOthers" data-i18n="review.select_others">依規則留一張、其餘都選</button>
       <button class="ghost" id="btnDetail" data-i18n="review.detail">看裡面內容</button>
       <button class="ghost" id="btnAuto" style="border-color:var(--warn);color:var(--warn)" data-i18n="review.auto">⚡ 全部交給它</button>
       <span class="sub" style="margin:0" id="selInfo">已選 0 張要刪</span>
@@ -303,6 +357,7 @@
 <button class="tour-dismiss" id="tourDismiss" data-i18n="tour.dismiss">這頁知道了 ✕</button>
 
 <script src="i18n.js"></script>
+<script src="keep.js"></script>
 <script>
 // ---------- mock 卡片圖（內嵌 SVG，file:// 預覽用） ----------
 // i18n: pick language before any rendering runs
@@ -381,6 +436,85 @@ function saveCfg(){                            // 記住上次資料夾＋DB＋�
   c.recent=[c.root,...(c.recent||[]).filter(x=>x&&x!==c.root)].slice(0,5);
   localStorage.setItem(LS_KEY,JSON.stringify(c)); renderRecent(c.recent);
 }
+
+// ---------- 進階：自動保留優先序（⚡全自動 與「依規則留一張」共用；純邏輯在 keep.js） ----------
+let KEEP_RULES=(()=>{ const k=loadCfg().keep; return (k==null)?DEFAULT_KEEP.map(r=>({...r})):k; })(); // seed-once：存過就不覆蓋（含空陣列）
+function saveKeep(){ const c=loadCfg(); c.keep=KEEP_RULES.map(({_re,...r})=>r); localStorage.setItem(LS_KEY,JSON.stringify(c)); } // 不存編譯後的 _re
+const META={
+  mtime:{label:()=>t('keep.meta_mtime'),   dirs:[['desc','keep.dir_newer'],['asc','keep.dir_older']]},
+  size:{ label:()=>t('keep.meta_size'),    dirs:[['desc','keep.dir_larger'],['asc','keep.dir_smaller']]},
+  namelen:{label:()=>t('keep.meta_namelen'),dirs:[['asc','keep.dir_shorter'],['desc','keep.dir_longer']]},
+};
+
+function renderPrio(){
+  const list=document.getElementById('prioList'); if(!list) return;
+  list.innerHTML='';
+  KEEP_RULES.forEach((rule,idx)=>{
+    const row=document.createElement('div'); row.className='prio-row'; row.dataset.i=idx;
+    if(rule.type==='regex'){
+      row.innerHTML=`<span class="grip">⠿</span><span class="ord">${idx+1}</span><span class="kind rx">${t('keep.kind_regex')}</span>`+
+        `<input class="label" placeholder="${t('keep.label_ph')}"><input class="pat mono" placeholder="${t('keep.pattern_ph')}"><button class="x" title="${t('keep.remove')}">×</button>`;
+      const lab=row.querySelector('.label'), pat=row.querySelector('.pat');
+      lab.value=rule.label||''; pat.value=rule.pattern||'';
+      lab.oninput=()=>{ rule.label=lab.value; saveKeep(); };
+      pat.oninput=()=>{ rule.pattern=pat.value; delete rule._re; let ok=true; try{ if(pat.value) new RegExp(pat.value); }catch(e){ ok=false; } pat.classList.toggle('bad',!ok); saveKeep(); };
+    } else {
+      const m=META[rule.key]||META.mtime;
+      row.innerHTML=`<span class="grip">⠿</span><span class="ord">${idx+1}</span><span class="kind">${t('keep.kind_meta')}</span>`+
+        `<span class="label">${m.label()}</span><span class="grow"></span><span class="seg">`+
+        m.dirs.map(([d,k])=>`<button data-dir="${d}" class="${rule.dir===d?'on':''}">${t(k)}</button>`).join('')+
+        `</span><button class="x" title="${t('keep.remove')}">×</button>`;
+      row.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{ rule.dir=b.dataset.dir; saveKeep(); renderPrio(); });
+    }
+    row.querySelector('.x').onclick=()=>{ KEEP_RULES.splice(idx,1); saveKeep(); renderPrio(); };
+    row.querySelector('.grip').onpointerdown=gripDown;   // 只從拖把起手（不卡輸入框）
+    list.appendChild(row);
+  });
+}
+const KEEP_PRESETS={                                       // 下排「新增規則」只給通用類型；regex 一律走自訂
+  mtime:()=>({type:'meta',key:'mtime',dir:'desc'}),
+  size:()=>({type:'meta',key:'size',dir:'desc'}),
+  namelen:()=>({type:'meta',key:'namelen',dir:'asc'}),
+  custom:()=>({type:'regex',label:'',pattern:''}),
+};
+// pointer 拖拉：從拖把起手，移動時即時重排 DOM，放開後依 DOM 順序重建規則陣列
+function gripDown(e){
+  const row=e.target.closest('.prio-row'); if(!row) return; e.preventDefault();
+  const list=document.getElementById('prioList');
+  const rows=[...list.querySelectorAll('.prio-row')]; const n=rows.length; if(n<2) return;
+  const fromIdx=rows.indexOf(row);
+  const step=rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top;  // 一格的間距（含 gap）
+  const startY=e.clientY; let newIdx=fromIdx;
+  row.classList.add('drag');
+  try{ e.target.setPointerCapture(e.pointerId); }catch(_){}
+  const move=ev=>{
+    const dy=ev.clientY-startY;
+    row.style.transform=`translateY(${dy}px)`;                       // 被拖的列跟手（無 transition）
+    newIdx=Math.max(0,Math.min(n-1, fromIdx+Math.round(dy/step)));
+    rows.forEach((r,i)=>{ if(i===fromIdx) return;                    // 其他列平滑讓位（CSS transition）
+      let s=0;
+      if(fromIdx<newIdx && i>fromIdx && i<=newIdx) s=-step;
+      else if(fromIdx>newIdx && i>=newIdx && i<fromIdx) s=step;
+      r.style.transform = s?`translateY(${s}px)`:'';
+    });
+  };
+  const up=()=>{
+    document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
+    if(newIdx!==fromIdx){ const [m]=KEEP_RULES.splice(fromIdx,1); KEEP_RULES.splice(newIdx,0,m); saveKeep(); }
+    renderPrio();                                                    // 重畫＝歸位＋重編號（transform 清空）
+  };
+  document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);
+}
+(function initPrio(){
+  if(!document.getElementById('prioList')) return;
+  document.querySelectorAll('#prioAdd [data-add]').forEach(b=>b.onclick=()=>{   // 新增規則（同類 meta 不重複加）
+    const r=KEEP_PRESETS[b.dataset.add]();
+    if(r.type==='meta' && KEEP_RULES.some(x=>x.type==='meta'&&x.key===r.key)) return;
+    KEEP_RULES.push(r); saveKeep(); renderPrio();
+  });
+  const reset=document.getElementById('keepReset'); if(reset) reset.onclick=()=>{ KEEP_RULES=DEFAULT_KEEP.map(r=>({...r})); saveKeep(); renderPrio(); };
+  renderPrio();
+})();
 function renderRecent(list){
   const row=document.getElementById('recentRow'); row.innerHTML='';
   if(!list||!list.length) return;
@@ -586,7 +720,7 @@ document.getElementById('btnDetail').onclick=()=>{
   if(DETAIL){ renderDetail(); ensureStrings(); } else removeDetail();
 };
 document.getElementById('btnSelOthers').onclick=()=>{
-  const g=BATCH[gi]; g.selected=new Set(g.files.map((_,i)=>i).slice(1)); renderGroup();
+  const g=BATCH[gi]; const keep=pickKeeper(g.files,KEEP_RULES); g.selected=new Set(g.files.map((_,i)=>i).filter(i=>i!==keep)); renderGroup();
 };
 document.getElementById('btnNext').onclick=next;
 document.getElementById('btnPrev').onclick=prev;
@@ -710,7 +844,7 @@ if(window.__TAURI__){
     catch(e){ toast(t('toast.read_fail',{e}), true); return; }
     if(!groups.length){ toast(t('toast.no_dups')); return; }
     BATCH=groups.map((g,i)=>({mode:MODE, character:'dup#'+(i+1), real:true,
-      files:g.files.map(f=>({name:f.name, size:f.size, url:toUrl(f.path), path:f.path})), selected:new Set()}));
+      files:g.files.map(f=>({name:f.name, size:f.size, mtime:f.mtime, url:toUrl(f.path), path:f.path})), selected:new Set()}));
     gi=0; showGroup(); show('review');
   };
   document.getElementById('btnDelete').onclick=async()=>{
@@ -731,7 +865,7 @@ if(window.__TAURI__){
     if(!groups.length){ toast(t('toast.no_dups')); return; }
     BATCH=groups.map((g,i)=>{
       const files=g.files.map(f=>({name:f.name, size:f.size, mtime:f.mtime, url:toUrl(f.path), path:f.path}));
-      let keep=0; for(let j=1;j<files.length;j++) if(files[j].mtime>files[keep].mtime) keep=j;  // 留最新
+      const keep=pickKeeper(files,KEEP_RULES);  // 依進階優先序決定留哪張（預設＝最新）
       return {mode:MODE, character:'dup#'+(i+1), real:true, files,
               selected:new Set(files.map((_,j)=>j).filter(j=>j!==keep))};
     });
@@ -816,6 +950,7 @@ function applyI18n(){
   }
   if(document.getElementById('v-review').classList.contains('on')) showGroup();
   if(document.getElementById('v-summary').classList.contains('on')) buildSummary();
+  if(typeof renderPrio==='function') renderPrio();   // 進階規則列含 t() 文字 → 換語言重畫
   drawTour();
 }
 buildLangSwitcher();
