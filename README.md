@@ -43,6 +43,22 @@ Only the top level of the chosen folder is scanned (subfolders, including the ap
 own output, are ignored). The character-data parser is byte-level and never decodes
 the embedded name, so non-UTF-8 / special-character card names are handled safely.
 
+## CLI (headless / AI agents)
+
+The same dedup engine ships as a headless binary, **`kdedupe`**, that shares the GUI's
+`dedupe.sqlite`. It prints JSON to stdout (progress/errors to stderr) so a script — or
+an AI agent — can scan, list, and delete without the GUI. See [AGENTS.md](AGENTS.md).
+
+```sh
+kdedupe describe                                  # JSON manifest: commands, flags, defaults
+kdedupe scan   --root "D:\cards" --mode byte      # scan + hash
+kdedupe groups --mode byte                         # duplicate groups (JSON)
+kdedupe delete --root "D:\cards" NAME...           # DRY-RUN (deletes nothing)
+kdedupe delete --root "D:\cards" --apply NAME...   # delete -> Recycle Bin
+```
+
+`delete` is dry-run unless `--apply` is given; `--db` defaults to the GUI's library.
+
 ## Build
 
 Requires [Rust](https://rustup.rs) and the [Tauri CLI](https://tauri.app)
@@ -50,10 +66,12 @@ Requires [Rust](https://rustup.rs) and the [Tauri CLI](https://tauri.app)
 
 ```sh
 cd src-tauri
-cargo build --release      # -> target/release/app.exe (standalone)
+cargo build --release      # -> target/release/app.exe (GUI) + kdedupe.exe (headless CLI)
 # or a bundled installer:
 cargo tauri build
 ```
+
+Ship `kdedupe.exe` next to the GUI exe so the headless CLI travels with the app.
 
 The frontend is `dist/index.html` (plain HTML/CSS/JS — no build step).
 
