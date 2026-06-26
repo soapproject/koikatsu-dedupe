@@ -439,6 +439,7 @@ function availLabel(){
   return t('setup.avail',{n:2640});
 }
 const modeHooks=[];   // 後端分支可掛 refreshAvail
+const i18nHooks=[];   // re-run on language switch (registered by the Tauri backend block)
 function setMode(m){
   MODE=m;
   document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('sel', x.dataset.mode===m));
@@ -666,6 +667,7 @@ if(window.__TAURI__){
   }
   cfgRoot.addEventListener('input',refreshRootStatus);
   modeHooks.push(refreshAvail);
+  i18nHooks.push(refreshRootStatus);
   (async()=>{                                   // 預設索引檔（app data dir）
     if(!loadCfg().db){ try{ cfgDb.value=await invoke('default_db'); saveCfg(); }catch(e){} }
     refreshRootStatus(); refreshAvail();
@@ -801,6 +803,7 @@ function applyI18n(){
   setWindowTitle();
   renderRecent(loadCfg().recent);      // re-localize "最近："
   setMode(MODE);                       // re-localize availTxt (+ Tauri refreshAvail via modeHooks)
+  i18nHooks.forEach(fn=>{ try{ fn(); }catch(e){} });
   if(document.getElementById('v-sync').classList.contains('on')){
     // refresh idle/log chrome handled by applyStatic; nothing else needed
   }
