@@ -716,10 +716,11 @@ if(window.__TAURI__){
       toast(msg); setTimeout(()=>{ refreshAvail(); show('setup'); },1500);
     }catch(e){ toast(t('toast.delete_fail',{e}), true); }
   };
-  // ⚡ 全部自動：抓全部重複組，每組留 mtime 最新的一張，其餘進步驟4 摘要等你確認刪除
+  // ⚡ 全自動：抓「一次看幾組」設定的組數，每組留 mtime 最新的一張，其餘進步驟4 摘要等你確認刪除
   async function autoRun(){
+    const n=Math.max(1,+document.getElementById('batchN').value||20);
     let groups=[];
-    try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:1000000}); }
+    try{ groups=await invoke('list_groups',{db:cfgDb.value, mode:MODE, limit:n}); }
     catch(e){ toast(t('toast.read_fail',{e}), true); return; }
     if(!groups.length){ toast(t('toast.no_dups')); return; }
     BATCH=groups.map((g,i)=>{
