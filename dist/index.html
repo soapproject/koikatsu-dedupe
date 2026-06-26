@@ -166,7 +166,7 @@
         <input id="cfgRoot" value="./testdata" spellcheck="false">
         <button class="ghost" id="btnBrowseRoot" data-i18n="sync.browse">瀏覽…</button>
       </div>
-      <div class="cfg-status ok" id="rootStatus">✓ 資料夾存在 · 7 個 png（mock）</div>
+      <div class="cfg-status ok" id="rootStatus"></div>
       <div class="recent" id="recentRow"></div>
       <div class="cfg-row">
         <label data-i18n="sync.label.db">索引檔</label>
@@ -393,9 +393,7 @@ cfgGame.addEventListener('input',saveCfg);
 document.getElementById('btnBrowseGame').onclick=()=>{};   // Tauri 覆寫成原生選擇器
 document.getElementById('btnBrowseRoot').onclick=()=>{
   // Tauri: const dir = await open({directory:true}); cfgRoot.value = dir;
-  cfgRoot.value='./testdata'; saveCfg();
-  const s=document.getElementById('rootStatus');
-  s.className='cfg-status ok'; s.textContent='✓ 資料夾存在 · 7 個 png（mock）';
+  cfgRoot.value='./testdata'; saveCfg(); mockRootStatus();
 };
 document.getElementById('btnBrowseDb').onclick=()=>{
   // Tauri: const f = await save({filters:[{name:'sqlite',extensions:['sqlite']}]});
@@ -440,6 +438,8 @@ function availLabel(){
 }
 const modeHooks=[];   // 後端分支可掛 refreshAvail
 const i18nHooks=[];   // re-run on language switch (registered by the Tauri backend block)
+function mockRootStatus(){ const s=document.getElementById('rootStatus'); if(s){ s.className='cfg-status ok'; s.textContent=t('sync.root_ok',{n:7}); } }
+if(!window.__TAURI__) i18nHooks.push(mockRootStatus);   // file:// preview: localize the mock folder-status line on init + switch
 function setMode(m){
   MODE=m;
   document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('sel', x.dataset.mode===m));
