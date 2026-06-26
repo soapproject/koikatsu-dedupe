@@ -145,6 +145,7 @@
       'review.sel_info': { other: '已選 {n} 張要刪' },
       'review.prev': '← 上一組',
       'review.next': '下一組 →',
+      'review.to_summary': '✓ 回確認 →',
 
       'detail.loading': '載入角色資料中…',
       'detail.read_fail': '(讀取失敗) ',
@@ -281,6 +282,7 @@
       'review.sel_info': { one: '{n} card marked for deletion', other: '{n} cards marked for deletion' },
       'review.prev': '← Prev group',
       'review.next': 'Next group →',
+      'review.to_summary': '✓ Back to summary →',
 
       'detail.loading': 'Loading character data…',
       'detail.read_fail': '(read failed) ',
@@ -417,6 +419,7 @@
       'review.sel_info': { other: '已选 {n} 张要删' },
       'review.prev': '← 上一组',
       'review.next': '下一组 →',
+      'review.to_summary': '✓ 回确认 →',
 
       'detail.loading': '加载角色数据中…',
       'detail.read_fail': '(读取失败) ',
@@ -553,6 +556,7 @@
       'review.sel_info': { other: '削除対象 {n} 枚を選択' },
       'review.prev': '← 前のグループ',
       'review.next': '次のグループ →',
+      'review.to_summary': '✓ 確認へ戻る →',
 
       'detail.loading': 'キャラデータ読み込み中…',
       'detail.read_fail': '(読み込み失敗) ',
@@ -689,6 +693,7 @@
       'review.sel_info': { other: '삭제할 {n}장 선택됨' },
       'review.prev': '← 이전 그룹',
       'review.next': '다음 그룹 →',
+      'review.to_summary': '✓ 확인으로 →',
 
       'detail.loading': '캐릭터 데이터 불러오는 중…',
       'detail.read_fail': '(읽기 실패) ',
@@ -825,6 +830,7 @@
       'review.sel_info': { one: 'Выбрана {n} карта для удаления', few: 'Выбрано {n} карты для удаления', many: 'Выбрано {n} карт для удаления' },
       'review.prev': '← Пред. группа',
       'review.next': 'След. группа →',
+      'review.to_summary': '✓ К сводке →',
 
       'detail.loading': 'Загрузка данных персонажа…',
       'detail.read_fail': '(ошибка чтения) ',
@@ -961,6 +967,7 @@
       'review.sel_info': { one: '{n} tarjeta marcada para borrar', other: '{n} tarjetas marcadas para borrar' },
       'review.prev': '← Grupo anterior',
       'review.next': 'Siguiente grupo →',
+      'review.to_summary': '✓ Volver al resumen →',
 
       'detail.loading': 'Cargando datos del personaje…',
       'detail.read_fail': '(lectura fallida) ',

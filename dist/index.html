@@ -119,6 +119,8 @@
   td.sz{color:var(--dim);white-space:nowrap}
   .total{margin:16px 0;font-size:15px}
   .total b{color:var(--warn)}
+  #sumRows tr:hover{background:rgba(122,162,255,.10)}
+  .okmark{display:inline-block;margin-left:6px;color:var(--good);font-weight:700;font-size:12px}
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--good);color:#06210f;padding:12px 22px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.on{opacity:1}
   .toast.err{background:var(--danger);color:#2a0000;cursor:pointer}
@@ -329,7 +331,7 @@ let CURVIEW='sync';                                    // 目前在哪一步（�
 function fname(name,seed,d){return `Koikatsu-2024_0${(seed%9)+1}${10+seed%18}_${name}_${(seed*2654435761>>>0).toString(16).slice(0,4)}.png`;}
 
 // ---------- mock 資料 ----------
-let MODE='byte', GROUPS=[], gi=0, BATCH=[];
+let MODE='byte', GROUPS=[], gi=0, BATCH=[], fromSummary=false;  // fromSummary：從確認頁點某組進來編輯，按「下一組」會跳回確認頁
 const REAL = window.TESTDATA && window.TESTDATA.byteGroups || null;  // testdata 真實圖
 function makeGroups(mode,total){
   const out=[];
@@ -461,6 +463,7 @@ function renderGroup(){
   document.getElementById('grpCount').textContent=t('review.group_count',{i:gi+1,n:BATCH.length});
   document.getElementById('grpBar').style.width=((gi)/BATCH.length*100)+'%';
   document.getElementById('btnPrev').disabled = gi===0;
+  document.getElementById('btnNext').textContent = fromSummary ? t('review.to_summary') : t('review.next');
   const adv=g.mode==='char';
   const mb=document.getElementById('modeBadge');
   mb.textContent=adv?t('review.badge_char'):t('mode.byte'); mb.classList.toggle('adv',adv);
@@ -587,8 +590,9 @@ document.getElementById('btnSelOthers').onclick=()=>{
 };
 document.getElementById('btnNext').onclick=next;
 document.getElementById('btnPrev').onclick=prev;
-function prev(){ if(gi>0){ gi--; showGroup(); } }
+function prev(){ if(gi>0){ fromSummary=false; gi--; showGroup(); } }  // 改成瀏覽 → 取消單組編輯模式
 function next(){
+  if(fromSummary){ fromSummary=false; if(BATCH[gi]) BATCH[gi].reviewed=true; buildSummary(); return; }  // 單組編輯完→標記已二次確認、跳回確認頁
   if(gi<BATCH.length-1){gi++; showGroup();}
   else buildSummary();
 }
@@ -608,7 +612,9 @@ function buildSummary(){
   BATCH.forEach((g,gidx)=>g.selected.forEach(i=>{
     const f=g.files[i]; count++; bytes+=f.size;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${gidx+1}</td><td style="word-break:break-all">${f.name}</td><td class="sz">${fmtMB(f.size)}</td>`;
+    tr.style.cursor='pointer';
+    tr.innerHTML=`<td>${gidx+1}${g.reviewed?'<span class="okmark">✓</span>':''}</td><td style="word-break:break-all">${f.name}</td><td class="sz">${fmtMB(f.size)}</td>`;
+    tr.onclick=()=>{ gi=gidx; fromSummary=true; showGroup(); show('review'); };  // 點列 → 跳該組編輯，回來會跳回確認頁
     rows.appendChild(tr);
   }));
   document.getElementById('sumTotal').innerHTML = t('summary.total',{count, size:fmtMB(bytes), n:count});

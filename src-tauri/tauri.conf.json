@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "deduplate",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "io.github.soapproject.koikatsu-dedupe",
   "build": {
     "frontendDist": "../dist"
@@ -12,7 +12,9 @@
       {
         "title": "Koikatsu Dedupe",
         "width": 1180,
-        "height": 840,
+        "height": 1040,
+        "minWidth": 900,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false
       }
