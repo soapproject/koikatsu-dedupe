@@ -34,6 +34,10 @@ automatic prune of vanished files) keeps re-syncs incremental.
 
 The UI is plain-language with a first-run guided tour; a **?** dialog explains how
 the matching, indexing, incremental re-sync and deletion actually work.
+The UI ships in 7 languages — 繁中 / 简中 / English / 日本語 / 한국어 / Русский / Español —
+auto-detected from the system on first run and switchable from the top-right dropdown
+(choice remembered). Translations live in `dist/i18n.js`; completeness is guarded by
+`node scripts/check-i18n.mjs`.
 
 Only the top level of the chosen folder is scanned (subfolders, including the app's
 own output, are ignored). The character-data parser is byte-level and never decodes
