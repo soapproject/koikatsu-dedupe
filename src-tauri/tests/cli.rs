@@ -91,4 +91,15 @@ fn cli_round_on_testdata() {
     // usage errors -> exit 2 (not 0, not a panic)
     assert_eq!(kdedupe(&["scan"]).status.code(), Some(2), "missing --root");
     assert_eq!(kdedupe(&["frobnicate"]).status.code(), Some(2), "unknown command");
+    assert_eq!(kdedupe(&[]).status.code(), Some(2), "no args -> usage error");
+
+    // help/version are conventional flags (not value-flags) -> exit 0
+    let v = kdedupe(&["--version"]);
+    assert_eq!(v.status.code(), Some(0), "--version exit");
+    assert!(
+        String::from_utf8_lossy(&v.stdout).starts_with("kdedupe "),
+        "--version prints the version, got: {}",
+        String::from_utf8_lossy(&v.stdout)
+    );
+    assert_eq!(kdedupe(&["--help"]).status.code(), Some(0), "--help exit");
 }

@@ -94,6 +94,21 @@ fn need<'a>(flags: &'a HashMap<String, String>, k: &str, cmd: &str) -> Result<&'
 }
 
 pub fn run(argv: &[String]) -> i32 {
+    // help/version read as flags but behave like commands; handle before parsing
+    // (the parser would otherwise swallow `--help`/`--version` as value-flags).
+    if argv.is_empty() {
+        eprintln!("{USAGE}");
+        return 2;
+    }
+    if argv.iter().any(|a| a == "-h" || a == "--help" || a == "help") {
+        println!("{USAGE}"); // explicit help -> stdout, exit 0
+        return 0;
+    }
+    if argv.iter().any(|a| a == "-V" || a == "--version" || a == "version") {
+        println!("kdedupe {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
+
     let (pos, flags) = parse(argv);
     let cmd = pos.first().map(|s| s.as_str()).unwrap_or("");
     let db = flags.get("db").map(PathBuf::from).unwrap_or_else(default_db);
@@ -175,17 +190,9 @@ pub fn run(argv: &[String]) -> i32 {
             out(describe(&db));
             0
         }
-        "--version" | "version" => {
-            println!("kdedupe {}", env!("CARGO_PKG_VERSION"));
-            0
-        }
         "" => {
-            eprintln!("{USAGE}");
+            eprintln!("error: no command (try --help)\n\n{USAGE}");
             2
-        }
-        "help" | "--help" | "-h" => {
-            eprintln!("{USAGE}");
-            0
         }
         other => {
             eprintln!("error: unknown command '{other}'\n\n{USAGE}");
