@@ -13,8 +13,8 @@ a plain file hash misses those. This tool offers two modes:
   pre-filtered by the block length (`char_len`).
 
 Built with [Tauri](https://tauri.app) — a Rust backend plus a single static HTML
-frontend. No server, no Python. A SQLite index (top-level scan, two-tier hashing,
-automatic prune of vanished files) keeps re-syncs incremental.
+frontend. No server, no Python. A SQLite index (top-level scan by default, two-tier
+hashing, automatic prune of vanished files) keeps re-syncs incremental.
 
 ## Use
 
@@ -39,9 +39,12 @@ auto-detected from the system on first run and switchable from the top-right dro
 (choice remembered). Translations live in `dist/i18n.js`; completeness is guarded by
 `node scripts/check-i18n.mjs`.
 
-Only the top level of the chosen folder is scanned (subfolders, including the app's
-own output, are ignored). The character-data parser is byte-level and never decodes
-the embedded name, so non-UTF-8 / special-character card names are handled safely.
+Only the top level of the chosen folder is scanned by default; tick **Include
+subfolders** (step 1, or `--recursive` on the CLI) to walk the whole subtree. The
+index stores each card's full path, so two cards sharing a basename in different
+subfolders stay distinct and delete the right one. The character-data parser is
+byte-level and never decodes the embedded name, so non-UTF-8 / special-character
+card names are handled safely.
 
 ## CLI (headless / AI agents)
 

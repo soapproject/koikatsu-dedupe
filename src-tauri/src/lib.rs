@@ -13,12 +13,13 @@ async fn sync(
     db: String,
     mode: String,
     full: bool,
+    recursive: bool,
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut on = |p: core::Progress| {
             let _ = app.emit("sync-progress", p);
         };
-        let r = core::sync(Path::new(&root), Path::new(&db), &mode, full, &mut on)
+        let r = core::sync(Path::new(&root), Path::new(&db), &mode, full, recursive, &mut on)
             .map_err(|e| e.to_string())?;
         Ok::<serde_json::Value, String>(serde_json::json!({
             "total": r.total, "groups": r.groups, "dup_files": r.dup_files,
@@ -85,8 +86,8 @@ async fn copy_to_game(src: String, dest_dir: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn count_pngs(root: String) -> usize {
-    tauri::async_runtime::spawn_blocking(move || core::count_pngs(Path::new(&root)))
+async fn count_pngs(root: String, recursive: bool) -> usize {
+    tauri::async_runtime::spawn_blocking(move || core::count_pngs(Path::new(&root), recursive))
         .await
         .unwrap_or(0)
 }

@@ -206,6 +206,10 @@
       <div class="cfg-status ok" id="rootStatus"></div>
       <div class="recent" id="recentRow"></div>
       <div class="cfg-row">
+        <label data-i18n="sync.label.scope">掃描範圍</label>
+        <label class="radio"><input type="checkbox" id="recursive"> <span data-i18n="sync.recursive_opt">包含子資料夾</span></label>
+      </div>
+      <div class="cfg-row">
         <label data-i18n="sync.label.db">索引檔</label>
         <input id="cfgDb" value="./dedupe.sqlite" spellcheck="false">
         <button class="ghost" id="btnBrowseDb" data-i18n="sync.pick_loc">選位置</button>
@@ -432,7 +436,7 @@ const cfgRoot=document.getElementById('cfgRoot'), cfgDb=document.getElementById(
 const LS_KEY='dedupe.cfg';
 const loadCfg=()=>{try{return JSON.parse(localStorage.getItem(LS_KEY))||{}}catch(e){return{}}};
 function saveCfg(){                            // 記住上次資料夾＋DB＋遊戲路徑＋模式＋最近清單
-  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value; c.game=cfgGame.value; c.mode=MODE;
+  const c=loadCfg(); c.root=cfgRoot.value; c.db=cfgDb.value; c.game=cfgGame.value; c.mode=MODE; c.recursive=document.getElementById('recursive').checked;
   c.recent=[c.root,...(c.recent||[]).filter(x=>x&&x!==c.root)].slice(0,5);
   localStorage.setItem(LS_KEY,JSON.stringify(c)); renderRecent(c.recent);
   backend.saveCfg&&backend.saveCfg({root:c.root,db:c.db,mode:c.mode}); // 鏡寫到 app_data_dir/config.json，讓 kdedupe CLI 讀得到同一份設定
@@ -542,6 +546,7 @@ document.getElementById('btnBrowseDb').onclick=()=>{
   if(c.db) cfgDb.value=c.db;
   if(c.game) cfgGame.value=c.game;
   if(c.mode) MODE=c.mode;                     // 帶回上次的比對模式（setMode(MODE) 隨後套用到 UI）
+  document.getElementById('recursive').checked=!!c.recursive;
   renderRecent(c.recent);
 })();
 
@@ -795,7 +800,7 @@ if(window.__TAURI__){
   });
   async function refreshRootStatus(){
     const s=document.getElementById('rootStatus'); s.className='cfg-status'; s.textContent=t('sync.computing');
-    try{ const n=await invoke('count_pngs',{root:cfgRoot.value});
+    try{ const n=await invoke('count_pngs',{root:cfgRoot.value, recursive:document.getElementById('recursive').checked});
       s.className='cfg-status '+(n>0?'ok':'bad');
       s.textContent = n>0 ? t('sync.root_ok',{n}) : t('sync.root_bad',{n});
     }catch(e){}
@@ -808,6 +813,7 @@ if(window.__TAURI__){
     }catch(e){ el.textContent=t('setup.avail_none'); }
   }
   cfgRoot.addEventListener('input',refreshRootStatus);
+  document.getElementById('recursive').addEventListener('change',()=>{ saveCfg(); refreshRootStatus(); });
   modeHooks.push(refreshAvail);
   i18nHooks.push(refreshRootStatus);
   (async()=>{                                   // 預設索引檔（app data dir）
@@ -831,7 +837,7 @@ if(window.__TAURI__){
     btn.disabled=true; ph.textContent=t('sync.starting',{full: full?t('sync.full_note'):''}); bar.style.width='0%';
     log.textContent=t('sync.log_starting')+'\n';
     try{
-      const s=await invoke('sync',{root:cfgRoot.value, db:cfgDb.value, mode:MODE, full});
+      const s=await invoke('sync',{root:cfgRoot.value, db:cfgDb.value, mode:MODE, full, recursive:document.getElementById('recursive').checked});
       bar.style.width='100%'; ph.textContent=t('sync.done');
       log.textContent+=t('sync.log_done',{total:s.total,groups:s.groups,dup:s.dup_files,added:s.new,pruned:s.pruned})+'\n';
       document.getElementById('btnSyncSkip').disabled=false;
@@ -850,7 +856,7 @@ if(window.__TAURI__){
     gi=0; showGroup(); show('review');
   };
   document.getElementById('btnDelete').onclick=async()=>{
-    const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].name)));
+    const names=[]; BATCH.forEach(g=>g.selected.forEach(i=>names.push(g.files[i].path||g.files[i].name))); // full path → deletes the right card when subfolders share a basename
     if(!names.length){ toast(t('toast.none_selected')); return; }
     const btn=document.getElementById('btnDelete'), label=btn.textContent;
     btn.disabled=true; btn.textContent=t('summary.deleting',{n:names.length});  // 立刻給回饋：刪大量檔時後端要跑數秒，否則 UI 看似卡死

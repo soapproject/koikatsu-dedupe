@@ -24,6 +24,7 @@ guess or be told the paths.
 
 ```sh
 kdedupe scan   --root "D:\cards" --mode byte      # scan + hash -> {total,groups,dup_files,new,pruned}
+                                                  #   add --recursive to scan subfolders too
 kdedupe groups --mode byte                         # [{hash,files:[{name,path,size,mtime}]}]  <- decide here
 kdedupe delete --root "D:\cards" NAME1 NAME2 ...   # DRY-RUN: prints what it WOULD delete, deletes nothing
 kdedupe delete --root "D:\cards" --apply NAME1 ... # actually deletes (-> Recycle Bin, recoverable)
@@ -39,7 +40,9 @@ kdedupe delete --root "D:\cards" --apply NAME1 ... # actually deletes (-> Recycl
 
 The CLI does **not** decide keepers — you do. Read `groups`, and for each group
 keep exactly one file (e.g. the newest by `mtime`, or by a naming rule) and pass the
-*other* filenames to `delete`. Names are the bare filename (not the full path).
+*other* cards to `delete`. A bare filename works for a top-level scan; pass the full
+`path` from `groups` when you scanned with `--recursive`, so cards sharing a basename
+across subfolders delete the right one.
 
 ## Rules
 

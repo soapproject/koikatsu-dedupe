@@ -158,42 +158,57 @@ fn hash_char_block(path: &Path, offset: u64) -> std::io::Result<String> {
     Ok(format!("{:016x}", h.finish()))
 }
 
-/// top-level pngs only -> INSERT OR IGNORE; prune rows whose file vanished.
-/// Uses dir-entry file_type (free on Windows) to avoid a stat per entry; only
-/// the kept pngs get a metadata() call (needed for size/mtime).
-fn scan(conn: &mut Connection, root: &Path, on: &mut dyn FnMut(Progress)) -> rusqlite::Result<(i64, i64)> {
+/// Visit every PNG *file* under `root`, calling `f` per entry. `recursive`
+/// descends into subdirectories; symlinked dirs are NOT followed (DirEntry's
+/// file_type doesn't follow links), so there's no cycle risk. file_type() and
+/// metadata() come free from the dir enumeration on Windows, so callers skip an
+/// extra stat per entry.
+fn walk_pngs(root: &Path, recursive: bool, f: &mut dyn FnMut(&fs::DirEntry)) {
+    let rd = match fs::read_dir(root) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for e in rd.flatten() {
+        let ft = match e.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if ft.is_dir() {
+            if recursive {
+                walk_pngs(&e.path(), recursive, f);
+            }
+        } else if ft.is_file() && is_png(&e.path()) {
+            f(&e);
+        }
+    }
+}
+
+/// pngs (top-level, or recursive subtree) -> INSERT OR IGNORE; prune rows whose
+/// file vanished. Stores the full path, so two cards with the same basename in
+/// different subfolders stay distinct (delete keys on the full path).
+fn scan(conn: &mut Connection, root: &Path, recursive: bool, on: &mut dyn FnMut(Progress)) -> rusqlite::Result<(i64, i64)> {
     let mut seen: Vec<(String, i64, f64)> = Vec::new();
     let mut seen_set: HashSet<String> = HashSet::new();
     let mut last = Instant::now();
-    if let Ok(rd) = fs::read_dir(root) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if !is_png(&p) {
-                continue;
-            }
-            // file_type() is free from the directory enumeration on Windows
-            if !e.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let md = match e.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let mtime = md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0);
-            let path = p.to_string_lossy().to_string();
-            seen_set.insert(path.clone());
-            seen.push((path, md.len() as i64, mtime));
-            if last.elapsed().as_millis() >= 150 {
-                on(Progress { phase: "scan".into(), done: seen.len() as u64, total: 0 });
-                last = Instant::now();
-            }
+    walk_pngs(root, recursive, &mut |e| {
+        let md = match e.metadata() {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let mtime = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let path = e.path().to_string_lossy().to_string();
+        seen_set.insert(path.clone());
+        seen.push((path, md.len() as i64, mtime));
+        if last.elapsed().as_millis() >= 150 {
+            on(Progress { phase: "scan".into(), done: seen.len() as u64, total: 0 });
+            last = Instant::now();
         }
-    }
+    });
     on(Progress { phase: "scan".into(), done: seen.len() as u64, total: seen.len() as u64 });
 
     let tx = conn.transaction()?;
@@ -356,13 +371,14 @@ pub fn sync(
     db: &Path,
     mode: &str,
     full: bool,
+    recursive: bool,
     on: &mut dyn FnMut(Progress),
 ) -> rusqlite::Result<SyncResult> {
     let mut conn = open_db(db)?;
     if full {
         conn.execute("DELETE FROM files", [])?;
     }
-    let (new, pruned) = scan(&mut conn, root, on)?;
+    let (new, pruned) = scan(&mut conn, root, recursive, on)?;
     if mode == "char" {
         hash_phase_char(&mut conn, on)?;
     } else {
@@ -435,11 +451,16 @@ pub fn delete_files(root: &Path, db: &Path, names: &[String]) -> (usize, u64, Ve
     let mut freed = 0u64;
     let mut errors = Vec::new();
     for name in names {
-        let base = Path::new(name)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(name);
-        let p = root.join(base);
+        // Prefer the path as given: the GUI / `groups` output carries the full
+        // stored path, so cards sharing a basename across subfolders delete the
+        // right one. Fall back to root+basename for bare filenames (CLI / legacy).
+        let given = Path::new(name);
+        let p = if given.is_file() {
+            given.to_path_buf()
+        } else {
+            let base = given.file_name().and_then(|n| n.to_str()).unwrap_or(name);
+            root.join(base)
+        };
         let md = match fs::metadata(&p) {
             Ok(m) => m,
             Err(e) => {
@@ -546,16 +567,10 @@ pub fn mode_hashed(db: &Path, mode: &str) -> bool {
     .unwrap_or(false)
 }
 
-/// Count top-level pngs using free dir-entry file_type (no stat per file).
-pub fn count_pngs(root: &Path) -> usize {
-    fs::read_dir(root)
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| {
-                    e.file_type().map(|t| t.is_file()).unwrap_or(false)
-                        && is_png(&e.path())
-                })
-                .count()
-        })
-        .unwrap_or(0)
+/// Count pngs (top-level, or the whole subtree when `recursive`) using free
+/// dir-entry file_type (no stat per file).
+pub fn count_pngs(root: &Path, recursive: bool) -> usize {
+    let mut n = 0usize;
+    walk_pngs(root, recursive, &mut |_| n += 1);
+    n
 }

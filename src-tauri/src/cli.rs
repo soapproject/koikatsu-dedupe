@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // Flags that take no value (presence = true). Everything else is `--name value`.
-const BOOL_FLAGS: &[&str] = &["full", "apply"];
+const BOOL_FLAGS: &[&str] = &["full", "apply", "recursive"];
 
 const USAGE: &str = "\
 kdedupe — headless dedup CLI (same dedupe.sqlite as the GUI)
@@ -20,11 +20,11 @@ USAGE:
   kdedupe <command> [--flags] [NAMES...]
 
 COMMANDS:
-  scan   --root DIR [--db P] [--mode byte|char] [--full]   scan+hash; prints counts
+  scan   --root DIR [--db P] [--mode byte|char] [--full] [--recursive]  scan+hash; prints counts
   groups [--db P] [--mode byte|char] [--limit N]           list duplicate groups (JSON)
   stats  [--db P] [--mode byte|char]                       group/dup-file counts
   strings --path PNG                                       readable card strings (JSON)
-  count  --root DIR                                         number of top-level pngs
+  count  --root DIR [--recursive]                           number of pngs (subtree if --recursive)
   delete --root DIR [--db P] NAME...                        DRY-RUN; add --apply to delete
   config                                                    show resolved root/db/mode (JSON)
   describe                                                  machine-readable manifest (JSON)
@@ -108,11 +108,11 @@ fn describe(db: &Path) -> Value {
         "modes": ["byte", "char"],
         "safe_workflow": ["scan", "groups", "(agent picks names to delete, keeping 1 per group)", "delete (dry-run)", "delete --apply"],
         "commands": [
-            {"name":"scan","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"},{"name":"--full","type":"bool"}],"output":"{total,groups,dup_files,new,pruned}"},
+            {"name":"scan","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"},{"name":"--full","type":"bool"},{"name":"--recursive","type":"bool"}],"output":"{total,groups,dup_files,new,pruned}"},
             {"name":"groups","args":[{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"},{"name":"--limit","type":"int"}],"output":"[{hash,files:[{name,path,size,mtime}]}]"},
             {"name":"stats","args":[{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"}],"output":"{groups,dup_files,synced}"},
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
-            {"name":"count","args":[{"name":"--root","required":true,"type":"dir"}],"output":"int"},
+            {"name":"count","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"}],"output":"int"},
             {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
             {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
@@ -177,8 +177,9 @@ pub fn run(argv: &[String]) -> i32 {
                 Err(c) => return c,
             };
             let full = flags.contains_key("full");
+            let recursive = flags.contains_key("recursive");
             let mut on = |p: core::Progress| eprintln!("[{}] {}/{}", p.phase, p.done, p.total);
-            match core::sync(&root, &db, &mode, full, &mut on) {
+            match core::sync(&root, &db, &mode, full, recursive, &mut on) {
                 Ok(r) => {
                     out(json!({"total":r.total,"groups":r.groups,"dup_files":r.dup_files,"new":r.new,"pruned":r.pruned}));
                     0
@@ -216,7 +217,7 @@ pub fn run(argv: &[String]) -> i32 {
                 Ok(r) => r,
                 Err(c) => return c,
             };
-            out(json!(core::count_pngs(&root)));
+            out(json!(core::count_pngs(&root, flags.contains_key("recursive"))));
             0
         }
         "delete" => {

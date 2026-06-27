@@ -40,7 +40,7 @@ fn round_on_testdata() {
     let db = tmp.join("test.sqlite");
 
     // 1) byte sync -> 3 dup groups
-    let r = app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap();
+    let r = app_lib::core::sync(&root, &db, "byte", false, false, &mut |_| {}).unwrap();
     assert_eq!(r.groups, 3, "expected 3 byte groups, got {}", r.groups);
 
     // 2) list groups
@@ -71,7 +71,7 @@ fn round_on_testdata() {
     assert!(app_lib::core::mode_hashed(&db, "byte"), "byte should read as hashed after byte sync");
 
     // advanced (char-data) mode also finds the 3 dup groups on this fixture
-    let rc = app_lib::core::sync(&root, &db, "char", false, &mut |_| {}).unwrap();
+    let rc = app_lib::core::sync(&root, &db, "char", false, false, &mut |_| {}).unwrap();
     assert_eq!(rc.groups, 3, "expected 3 char groups, got {}", rc.groups);
     assert!(app_lib::core::mode_hashed(&db, "char"), "char should read as hashed after char sync");
     assert_eq!(app_lib::core::list_groups(&db, "char", 100).len(), 3);
@@ -84,7 +84,7 @@ fn round_on_testdata() {
     assert!(freed > 0);
 
     // 4) re-sync -> 0 dup groups
-    let r2 = app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap();
+    let r2 = app_lib::core::sync(&root, &db, "byte", false, false, &mut |_| {}).unwrap();
     assert_eq!(r2.groups, 0, "expected 0 groups after dedup, got {}", r2.groups);
 
     // 5) 4 files remain (3 kept + 1 unique)
@@ -120,6 +120,46 @@ fn delete_readonly_file() {
     assert!(!f.exists(), "read-only file should be gone");
 }
 
+/// Recursive scan + the name-collision case it unlocks: two cards with the SAME
+/// basename in different subfolders must (a) only both be seen when --recursive,
+/// and (b) delete the RIGHT one by full path — not the top-level namesake.
+#[test]
+fn recursive_scan_collision_delete() {
+    let tmp = std::env::temp_dir().join("dedup_recursive_rs");
+    let _ = fs::remove_dir_all(&tmp);
+    let root = tmp.join("root");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    let body = b"identical-card-bytes-xxxxxxxxxxxxxxxx";
+    fs::write(root.join("a.png"), body).unwrap(); // top-level
+    fs::write(root.join("sub").join("a.png"), body).unwrap(); // same name, same bytes, nested
+    let db = tmp.join("rec.sqlite");
+
+    // non-recursive: only the top-level a.png is seen -> no dup group
+    let r = app_lib::core::sync(&root, &db, "byte", true, false, &mut |_| {}).unwrap();
+    assert_eq!(r.total, 1, "non-recursive should see only the top-level png");
+    assert_eq!(r.groups, 0);
+
+    // recursive: both seen -> 1 byte-identical group of 2
+    let rr = app_lib::core::sync(&root, &db, "byte", true, true, &mut |_| {}).unwrap();
+    assert_eq!(rr.total, 2, "recursive should see both pngs");
+    assert_eq!(rr.groups, 1);
+
+    let groups = app_lib::core::list_groups(&db, "byte", 10);
+    assert_eq!(groups.len(), 1);
+    let g = &groups[0];
+    assert_eq!(g.files.len(), 2);
+    assert!(g.files.iter().all(|f| f.name == "a.png"), "both basenames collide");
+
+    // delete the NESTED one by full path; the top-level namesake must survive
+    let nested = g.files.iter().find(|f| f.path.contains("sub")).unwrap().path.clone();
+    let (deleted, freed, errors) = app_lib::core::delete_files(&root, &db, &[nested]);
+    assert_eq!(deleted, 1, "delete errors: {:?}", errors);
+    assert!(errors.is_empty());
+    assert!(freed > 0);
+    assert!(root.join("a.png").exists(), "top-level namesake must NOT be deleted");
+    assert!(!root.join("sub").join("a.png").exists(), "nested card should be gone");
+}
+
 /// Large modded cards, one with a non-ASCII (CJK) filename: prove the path
 /// round-trips through scan -> hash -> group -> delete in both modes.
 #[test]
@@ -149,8 +189,8 @@ fn large_nonascii_round() {
     let db = tmp.join("large.sqlite");
 
     // one big dup pair -> 1 group in both modes
-    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap().groups, 1);
-    assert_eq!(app_lib::core::sync(&root, &db, "char", false, &mut |_| {}).unwrap().groups, 1);
+    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, false, &mut |_| {}).unwrap().groups, 1);
+    assert_eq!(app_lib::core::sync(&root, &db, "char", false, false, &mut |_| {}).unwrap().groups, 1);
 
     let groups = app_lib::core::list_groups(&db, "byte", 10);
     assert_eq!(groups.len(), 1);
@@ -162,5 +202,5 @@ fn large_nonascii_round() {
     let (deleted, freed, errors) = app_lib::core::delete_files(&root, &db, &[target]);
     assert_eq!(deleted, 1, "non-ASCII delete failed: {:?}", errors);
     assert!(freed > 0);
-    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, &mut |_| {}).unwrap().groups, 0);
+    assert_eq!(app_lib::core::sync(&root, &db, "byte", false, false, &mut |_| {}).unwrap().groups, 0);
 }
