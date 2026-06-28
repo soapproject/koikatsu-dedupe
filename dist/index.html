@@ -84,6 +84,15 @@
   .hint{color:var(--dim);font-size:13px;margin:6px 0 18px}
   .footer-bar{display:flex;gap:12px;align-items:center;margin-top:8px}
   .footer-bar .spacer{flex:1}
+  /* 完整路徑開關 */
+  .pathsw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--dim);font-size:13px;user-select:none}
+  .pathsw input{display:none}
+  .pathsw .tk{position:relative;width:38px;height:20px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);transition:background .15s;flex:none}
+  .pathsw .tk::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dim);transition:transform .15s,background .15s}
+  .pathsw input:checked + .tk{background:var(--accent);border-color:var(--accent)}
+  .pathsw input:checked + .tk::after{transform:translateX(18px);background:#fff}
+  .pic .meta .fp{margin-top:3px;font-family:Consolas,monospace;font-size:11px;color:var(--accent);word-break:break-all}
+  td .fp{font-family:Consolas,monospace;font-size:12px;color:var(--accent)}
   #btnDetail.on{background:var(--accent2);color:#fff}
   .pic .copied{position:absolute;bottom:8px;right:8px;background:var(--good);color:#06210f;font-size:11px;font-weight:700;padding:3px 8px;border-radius:14px}
   .pic .picbtns{padding:0 10px 10px}
@@ -215,8 +224,8 @@
         <button class="ghost" id="btnBrowseDb" data-i18n="sync.pick_loc">選位置</button>
       </div>
       <div class="cfg-row">
-        <label data-i18n="sync.label.game">遊戲路徑</label>
-        <input id="cfgGame" data-i18n-placeholder="sync.game_ph" placeholder="（選填）例：…\Koikatsu\UserData\chara\female，用於「複製到遊戲目錄」" spellcheck="false">
+        <label data-i18n="sync.label.game">遊戲卡片路徑</label>
+        <input id="cfgGame" data-i18n-placeholder="sync.game_ph" placeholder="（選填）指到遊戲的 chara 資料夾，不是遊戲根目錄。例：…\Koikatsu\UserData\chara\female" spellcheck="false">
         <button class="ghost" id="btnBrowseGame" data-i18n="sync.pick_folder">選資料夾</button>
       </div>
       <div class="cfg-row">
@@ -303,6 +312,7 @@
       <button class="ghost" id="btnDetail" data-i18n="review.detail">看裡面內容</button>
       <button class="ghost" id="btnAuto" style="border-color:var(--warn);color:var(--warn)" data-i18n="review.auto">⚡ 全部交給它</button>
       <span class="sub" style="margin:0" id="selInfo">已選 0 張要刪</span>
+      <label class="pathsw"><input type="checkbox" id="swPathReview"><span class="tk"></span><span data-i18n="common.show_path">顯示完整路徑</span></label>
       <span class="spacer"></span>
       <button class="ghost" id="btnPrev" data-i18n="review.prev">← 上一組</button>
       <button id="btnNext" data-i18n="review.next">下一組 →</button>
@@ -316,6 +326,9 @@
     <div class="card-panel">
       <div class="total" id="sumTotal"></div>
       <div id="sumWarn" style="display:none;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:rgba(255,180,84,.14);border:1px solid var(--warn);color:var(--warn);font-size:13px" data-i18n-html="summary.warn">⚠ 這是「同角色、不同封面」的卡 —— 被刪那幾張的<b>封面會消失</b>（仍可從回收桶復原）。</div>
+      <div style="display:flex;margin:0 0 10px">
+        <label class="pathsw"><input type="checkbox" id="swPathSum"><span class="tk"></span><span data-i18n="common.show_path">顯示完整路徑</span></label>
+      </div>
       <div style="max-height:340px;overflow:auto">
         <table><thead><tr><th data-i18n="summary.col_group">組</th><th data-i18n="summary.col_name">檔名</th><th data-i18n="summary.col_size">大小</th></tr></thead>
         <tbody id="sumRows"></tbody></table>
@@ -387,6 +400,7 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 const backend={ copyToGame:null, cardStrings:null, saveCfg:null };  // Tauri 後端填入；file:// mock 維持 null
 let DETAIL=false;                                      // 詳細資料（角色資料 chunk）展開中？
 let CURVIEW='sync';                                    // 目前在哪一步（給導覽圈用）
+const fpath=f=>f.path||f.src||'';                      // 完整路徑（Tauri=path、testdata=src、純 mock=空）
 function fname(name,seed,d){return `Koikatsu-2024_0${(seed%9)+1}${10+seed%18}_${name}_${(seed*2654435761>>>0).toString(16).slice(0,4)}.png`;}
 
 // ---------- mock 資料 ----------
@@ -550,6 +564,17 @@ document.getElementById('btnBrowseDb').onclick=()=>{
   renderRecent(c.recent);
 })();
 
+// ---------- 完整路徑開關（比對頁＋確認頁共用一個偏好，記在 config；給不放心的人核對來源）----------
+let SHOWPATH=!!loadCfg().showPath;
+function setShowPath(v){
+  SHOWPATH=v;
+  const c=loadCfg(); c.showPath=v; localStorage.setItem(LS_KEY,JSON.stringify(c));
+  document.querySelectorAll('#swPathReview,#swPathSum').forEach(cb=>{ cb.checked=v; });   // 兩頁開關同步
+  if(document.getElementById('v-review').classList.contains('on')) renderGroup();
+  if(document.getElementById('v-summary').classList.contains('on')) buildSummary();
+}
+['swPathReview','swPathSum'].forEach(id=>{ const cb=document.getElementById(id); if(cb){ cb.checked=SHOWPATH; cb.onchange=()=>setShowPath(cb.checked); } });
+
 // ---------- 1. SYNC（假進度） ----------
 const syncSteps=[
   ['[scan]','walking ./testdata  (mock，不連線)', 18],
@@ -619,7 +644,7 @@ function renderGroup(){
         <div class="key">${idx<9?idx+1:'·'}</div>
         <div class="check">✓</div>
         ${f.copied?'<div class="copied">'+t('review.copied')+'</div>':''}</div>
-      <div class="meta"><div class="fn">${esc(f.name)}</div><div class="sz">${fmtMB(f.size)}</div></div>
+      <div class="meta"><div class="fn">${esc(f.name)}</div>${SHOWPATH&&fpath(f)?`<div class="fp">${esc(fpath(f))}</div>`:''}<div class="sz">${fmtMB(f.size)}</div></div>
       <div class="picbtns"><button class="mini${f.copied?' done':''}" data-act="game">${f.copied?t('review.copied_btn'):t('review.copy_to_game')}</button></div>`;
     el.onclick=()=>{ g.selected.has(idx)?g.selected.delete(idx):g.selected.add(idx); renderGroup(); };
     const gb=el.querySelector('[data-act=game]');
@@ -753,7 +778,8 @@ function buildSummary(){
     const f=g.files[i]; count++; bytes+=f.size;
     const tr=document.createElement('tr');
     tr.style.cursor='pointer';
-    tr.innerHTML=`<td>${gidx+1}${g.reviewed?'<span class="okmark">✓</span>':''}</td><td style="word-break:break-all">${f.name}</td><td class="sz">${fmtMB(f.size)}</td>`;
+    const disp = SHOWPATH&&fpath(f) ? esc(fpath(f)) : esc(f.name);
+    tr.innerHTML=`<td>${gidx+1}${g.reviewed?'<span class="okmark">✓</span>':''}</td><td style="word-break:break-all">${disp}</td><td class="sz">${fmtMB(f.size)}</td>`;
     tr.onclick=()=>{ gi=gidx; fromSummary=true; showGroup(); show('review'); };  // 點列 → 跳該組編輯，回來會跳回確認頁
     rows.appendChild(tr);
   }));
@@ -901,7 +927,8 @@ function drawTour(){
   if(!svg) return;
   svg.innerHTML=C_DEFS; labels.innerHTML='';
   const ANN={
-    sync:[ {sel:'#cfgDb',text:t('tour.sync.db'),side:'bottom',color:'#ffb454'},
+    sync:[ {sel:'#cfgDb',text:t('tour.sync.db'),side:'top',color:'#ffb454'},
+           {sel:'#cfgGame',text:t('tour.sync.game'),side:'bottom',color:'#7aa2ff'},
            {sel:'#rebuildOpt',text:t('tour.sync.rebuild'),side:'bottom',color:'#7ee0a0'},
            {sel:'#btnSync',text:t('tour.sync.start'),side:'bottom',color:'#ff8a9b'} ],
     setup:[ {sel:'#modeCards',text:t('tour.setup.modes'),side:'bottom',color:'#ff8a9b'} ],
