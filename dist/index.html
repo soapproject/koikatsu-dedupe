@@ -287,7 +287,7 @@
       </div>
       <div class="num" id="batchRow">
         <label data-i18n="setup.batch_label">一次看幾組</label>
-        <input id="batchN" type="number" value="20" min="1" max="500">
+        <input id="batchN" type="number" value="20" min="1">
         <span class="sub" style="margin:0" id="availTxt">／ 可用 14,293 組</span>
       </div>
       <div style="display:flex;gap:12px">
@@ -836,6 +836,7 @@ if(window.__TAURI__){
     const label=MODE==='char'?t('mode.char_short'):t('mode.byte_short');
     try{ const s=await invoke('stats',{db:cfgDb.value, mode:MODE});
       el.textContent = s.synced ? t('setup.avail',{n:s.groups}) : t('setup.avail_not_synced',{label});
+      if(s.synced && s.groups>0) document.getElementById('batchN').value=s.groups;  // 預設＝找到幾組就幾組（切模式/重掃/刪除後會跟著更新，會蓋掉手動填的值）
     }catch(e){ el.textContent=t('setup.avail_none'); }
   }
   cfgRoot.addEventListener('input',refreshRootStatus);
