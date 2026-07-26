@@ -308,3 +308,106 @@ fn without_a_game_root_no_voice_claim_is_made() {
     let p = organize::plan(&root, true, None);
     assert!(p.voice_incompatible.is_empty());
 }
+
+/// The user's actual conversion step operates on cards already filed in the
+/// Sunshine destination folder from an earlier pass. If those are never
+/// voice-checked, "surface it before conversion" is not delivered for a
+/// re-run — exactly the population the check exists to protect. Flagging
+/// must not change where the card goes: it stays in `skipped`, never gains
+/// a `moves` entry.
+#[test]
+fn an_already_filed_kks_card_with_an_unsupported_personality_is_still_flagged() {
+    let root = fresh("voice_filed");
+    let game = root.join("game");
+    fs::create_dir_all(game.join("abdata/sound/data/pcm/c00")).unwrap();
+    let support = organize::voice_support(&game);
+
+    let filed = put(
+        &root,
+        "KoikatsuSunshine/Female/c.png",
+        &card("【KoiKatuCharaSun】", 1, "a", "b", Some(77)),
+    );
+
+    let p = organize::plan(&root, true, Some(&support));
+    assert_eq!(p.voice_incompatible.len(), 1, "{p:?}");
+    assert_eq!(p.voice_incompatible[0].path, filed);
+    assert_eq!(p.voice_incompatible[0].personality, 77);
+    assert_eq!(p.skipped, vec![filed], "still just skipped, never an error");
+    assert!(p.moves.is_empty(), "an already-filed card must not move: {p:?}");
+}
+
+/// A read failure on an already-filed file must not turn a clean `skipped`
+/// into an error: it is reported the same way any other unreadable file is,
+/// and the skip itself still happens.
+#[test]
+fn an_already_filed_unreadable_png_stays_skipped_and_is_also_reported() {
+    let root = fresh("voice_filed_bad");
+    let game = root.join("game");
+    fs::create_dir_all(game.join("abdata/sound/data/pcm/c00")).unwrap();
+    let support = organize::voice_support(&game);
+
+    let filed = put(
+        &root,
+        "KoikatsuSunshine/Female/broken.png",
+        b"\x89PNG\r\n\x1a\nnot really a png body",
+    );
+
+    let p = organize::plan(&root, true, Some(&support));
+    assert_eq!(p.skipped, vec![filed.clone()], "{p:?}");
+    assert!(p.moves.is_empty());
+    assert_eq!(p.unreadable.len(), 1, "{p:?}");
+    assert_eq!(p.unreadable[0].path, filed);
+}
+
+/// A scan that could not read the `pcm` directory at all (a mistyped game
+/// root, the realistic failure) must not be indistinguishable from a
+/// genuinely empty install: it must make no voice claim whatsoever, the
+/// same treatment as no game root being supplied, rather than flagging
+/// every personality as unsupported.
+#[test]
+fn a_failed_scan_makes_no_voice_claim() {
+    let root = fresh("voice_scan_failed");
+    let game = root.join("does_not_exist");
+    let support = organize::voice_support(&game);
+    assert!(!support.ok, "a missing pcm directory is a failed scan, not an empty install");
+    assert!(support.ids.is_empty());
+
+    put(&root, "in/kks.png", &card("【KoiKatuCharaSun】", 1, "a", "b", Some(77)));
+    let p = organize::plan(&root, true, Some(&support));
+    assert!(p.voice_incompatible.is_empty(), "a failed scan must not flag any card: {p:?}");
+}
+
+/// A `pcm` directory that opens cleanly but genuinely contains no personality
+/// subfolders is a real (if unusual) empty install, not a failed scan: `ok`
+/// must be true, distinguishing it from the failed-scan case above, and its
+/// legitimately empty supported set really does mean every personality is
+/// unsupported.
+#[test]
+fn a_genuinely_empty_install_is_distinguishable_from_a_failed_scan() {
+    let root = fresh("voice_scan_empty");
+    let game = root.join("game");
+    fs::create_dir_all(game.join("abdata/sound/data/pcm")).unwrap();
+    let support = organize::voice_support(&game);
+    assert!(support.ok, "the directory was read successfully, just empty");
+    assert!(support.ids.is_empty());
+
+    put(&root, "in/kks.png", &card("【KoiKatuCharaSun】", 1, "a", "b", Some(77)));
+    let p = organize::plan(&root, true, Some(&support));
+    assert_eq!(
+        p.voice_incompatible.len(), 1,
+        "a genuinely empty install really does not support this personality: {p:?}"
+    );
+}
+
+/// A stray FILE named like a personality folder (`c5`) must not be counted
+/// as support for it — only directories are personalities under `pcm`.
+#[test]
+fn a_file_named_like_a_personality_folder_is_not_counted() {
+    let root = fresh("voice_file_not_dir");
+    let game = root.join("game");
+    let pcm = game.join("abdata/sound/data/pcm");
+    fs::create_dir_all(&pcm).unwrap();
+    fs::write(pcm.join("c05"), b"not a directory").unwrap();
+    let support = organize::voice_support(&game);
+    assert!(support.ids.is_empty(), "a file, not a directory, must not count: {:?}", support.ids);
+}

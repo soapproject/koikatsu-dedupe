@@ -58,27 +58,58 @@ pub struct VoiceIssue {
 /// 20,502-mod install found none doing so (the set was exactly the base
 /// game's contiguous 0-38). `source` records what was actually scanned so a
 /// report never overstates its own coverage.
+///
+/// `ok` distinguishes "the scan ran and the install genuinely supports these
+/// (possibly zero) personalities" from "the scan could not run at all"
+/// (nonexistent or unreadable `pcm` directory — e.g. a mistyped game root).
+/// Those two cases would otherwise both present as an empty `ids`, and a
+/// failed scan treated as "supports nothing" would flag every Sunshine card
+/// with a personality — exactly the guessed supported set this module is
+/// built to avoid. When `ok` is `false`, callers must make no voice claim at
+/// all, the same as if no `VoiceSupport` had been supplied.
 #[derive(Debug, Clone)]
 pub struct VoiceSupport {
     pub ids: BTreeSet<i64>,
     pub source: String,
+    pub ok: bool,
 }
 
 /// Reads the personality ids a game install can voice, from its
 /// `abdata/sound/data/pcm/c<N>` folders. Sideloader-added zipmods are not
-/// scanned (see `VoiceSupport` doc) — `source` says so explicitly.
+/// scanned (see `VoiceSupport` doc) — `source` says so explicitly. If the
+/// `pcm` directory itself cannot be read (missing or inaccessible — the
+/// realistic shape of a mistyped game root), `ok` is `false` and `source`
+/// says the scan failed rather than quietly reporting zero personality ids
+/// as though a real, empty install had been read.
 pub fn voice_support(game_root: &Path) -> VoiceSupport {
     let dir = game_root.join("abdata").join("sound").join("data").join("pcm");
+    let rd = match fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            return VoiceSupport {
+                ids: BTreeSet::new(),
+                source: format!(
+                    "{}: scan failed ({e}) — no voice claim can be made",
+                    dir.display()
+                ),
+                ok: false,
+            };
+        }
+    };
     let mut ids = BTreeSet::new();
-    if let Ok(rd) = fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            // `c00`..`c38` are personalities; `c-1`, `c-100` etc. are special voices.
-            if let Some(rest) = name.strip_prefix('c') {
-                if let Ok(n) = rest.parse::<i64>() {
-                    if n >= 0 {
-                        ids.insert(n);
-                    }
+    for e in rd.flatten() {
+        // Only directories are personalities. A stray file that happens to
+        // be named like one (`c5`) must not be counted as support for it.
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_string();
+        // `c00`..`c38` are personalities; `c-1`, `c-100` etc. are special voices.
+        if let Some(rest) = name.strip_prefix('c') {
+            if let Ok(n) = rest.parse::<i64>() {
+                if n >= 0 {
+                    ids.insert(n);
                 }
             }
         }
@@ -90,6 +121,30 @@ pub fn voice_support(game_root: &Path) -> VoiceSupport {
             ids.len()
         ),
         ids,
+        ok: true,
+    }
+}
+
+/// Whether `meta`'s personality is one `voice` confirms the install can
+/// actually speak. `None` means no flag: either `meta` isn't a Sunshine
+/// card (KK is always the conversion target, never the thing being
+/// checked), no `VoiceSupport` was supplied, the scan behind it failed
+/// (`ok == false` — treated exactly like no `VoiceSupport` at all, per its
+/// doc comment), or the card has no personality to check. `Some(pid)` means
+/// `pid` is not in the install's supported set and should be flagged.
+fn voice_issue(meta: &CardMeta, voice: Option<&VoiceSupport>) -> Option<i64> {
+    if meta.game != crate::card::Game::KoikatsuSunshine {
+        return None;
+    }
+    let v = voice?;
+    if !v.ok {
+        return None;
+    }
+    let pid = meta.personality?;
+    if v.ids.contains(&pid) {
+        None
+    } else {
+        Some(pid)
     }
 }
 
@@ -445,6 +500,30 @@ pub fn plan(root: &Path, recursive: bool, voice: Option<&VoiceSupport>) -> Plan 
     let mut claims: HashMap<PathBuf, HashMap<String, Claim>> = HashMap::new();
     for f in files {
         if is_in_dest_folder(root, &f) {
+            // Already-filed cards are exactly the population headed for the
+            // user's actual conversion step, so they must still be voice
+            // checked — being flagged does not change where a card goes
+            // (it stays in `skipped`, never gains a `moves` entry), only
+            // what gets reported. Reading is skipped entirely when there is
+            // no voice check to make, to leave the no-`voice` behaviour
+            // unchanged. A read failure here must not turn a clean `skipped`
+            // into an error: it is reported the same way any other
+            // unreadable file is, and the skip still happens.
+            if voice.is_some() {
+                match read_card(&f) {
+                    Ok(meta) => {
+                        if let Some(pid) = voice_issue(&meta, voice) {
+                            p.voice_incompatible.push(VoiceIssue { path: f.clone(), personality: pid });
+                        }
+                    }
+                    Err(e @ CardError::Unrecognized(_)) => {
+                        p.unrecognized.push(Unreadable { path: f.clone(), reason: e.reason() });
+                    }
+                    Err(e) => {
+                        p.unreadable.push(Unreadable { path: f.clone(), reason: e.reason() });
+                    }
+                }
+            }
             p.skipped.push(f);
             continue;
         }
@@ -466,12 +545,8 @@ pub fn plan(root: &Path, recursive: bool, voice: Option<&VoiceSupport>) -> Plan 
         // Only Sunshine cards are headed for conversion into KK, so only they
         // can end up voiceless there. Flagging is a report, not a filter —
         // the card still gets its normal entry in `moves` below.
-        if meta.game == crate::card::Game::KoikatsuSunshine {
-            if let (Some(v), Some(pid)) = (voice, meta.personality) {
-                if !v.ids.contains(&pid) {
-                    p.voice_incompatible.push(VoiceIssue { path: f.clone(), personality: pid });
-                }
-            }
+        if let Some(pid) = voice_issue(&meta, voice) {
+            p.voice_incompatible.push(VoiceIssue { path: f.clone(), personality: pid });
         }
         let dir = destination(root, &meta);
         let name_s = name.to_string_lossy().to_string();
