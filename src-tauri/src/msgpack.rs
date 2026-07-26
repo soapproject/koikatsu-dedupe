@@ -46,14 +46,24 @@ impl Value {
     }
 }
 
+/// How deep a container may nest before decoding is refused. Card blocks are
+/// maps of arrays of maps — three or four levels — so a real card never comes
+/// close. The cap exists because the decoder recurses: a hostile or corrupt
+/// block of consecutive `0x91` bytes would otherwise recurse once per byte and
+/// overflow the stack, which in Rust ABORTS the process rather than unwinding.
+/// A returned `Err` is the whole point: the caller already reports a malformed
+/// card, and nothing in this crate may take the process down over one bad file.
+const MAX_DEPTH: usize = 64;
+
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Reader<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
-        Reader { buf, pos: 0 }
+        Reader { buf, pos: 0, depth: 0 }
     }
     /// Byte offset of the next unread byte. Lets a caller locate a decoded
     /// field inside the original buffer without re-encoding anything.
@@ -78,20 +88,34 @@ impl<'a> Reader<'a> {
     fn string(&mut self, n: usize) -> Result<Value, String> {
         Ok(Value::Str(String::from_utf8_lossy(self.take(n)?).into_owned()))
     }
+    /// Enters one container level, refusing to recurse past `MAX_DEPTH`. On
+    /// the error path the depth counter is deliberately not restored: the
+    /// whole decode is being abandoned, and every frame returns `Err`.
+    fn enter(&mut self) -> Result<(), String> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(format!("msgpack nested deeper than {MAX_DEPTH} levels"));
+        }
+        Ok(())
+    }
     fn array(&mut self, n: usize) -> Result<Value, String> {
+        self.enter()?;
         let mut v = Vec::with_capacity(n.min(1024));
         for _ in 0..n {
             v.push(self.read()?);
         }
+        self.depth -= 1;
         Ok(Value::Array(v))
     }
     fn map(&mut self, n: usize) -> Result<Value, String> {
+        self.enter()?;
         let mut v = Vec::with_capacity(n.min(1024));
         for _ in 0..n {
             let k = self.read()?;
             let val = self.read()?;
             v.push((k, val));
         }
+        self.depth -= 1;
         Ok(Value::Map(v))
     }
 
@@ -184,6 +208,38 @@ mod tests {
     fn truncated_input_is_an_error_not_a_panic() {
         let buf = [0xA5, b'0', b'.']; // fixstr(5) but only 2 bytes follow
         assert!(decode(&buf).is_err());
+    }
+
+    /// The decoder recurses per container, so deeply nested input would blow
+    /// the stack — and a stack overflow in Rust ABORTS the process, which no
+    /// malformed card may be allowed to do. It must be an ordinary `Err`.
+    #[test]
+    fn pathological_nesting_is_an_error_not_a_stack_overflow() {
+        let mut buf = vec![0x91u8; 100_000]; // 100k nested fixarray(1)
+        buf.push(0x00); // ...eventually holding a single int
+        let e = decode(&buf).expect_err("must refuse, not recurse");
+        assert!(e.contains("nested deeper"), "{e}");
+
+        // The same shape built from maps.
+        let mut m = vec![0x81u8; 100_000];
+        m.extend_from_slice(&[0xA1, b'k', 0x00]);
+        assert!(decode(&m).is_err());
+    }
+
+    /// The cap must not reject the nesting real cards use. A card's block
+    /// table is a map of an array of maps — three levels — so anything within
+    /// an order of magnitude of that has to keep decoding.
+    #[test]
+    fn nesting_within_the_cap_still_decodes() {
+        let mut buf = vec![0x91u8; 60];
+        buf.push(0x07);
+        let v = decode(&buf).expect("60 levels is well inside the cap");
+        // Unwrap all 60 arrays and find the int.
+        let mut cur = &v;
+        for _ in 0..60 {
+            cur = &cur.as_array().expect("array")[0];
+        }
+        assert_eq!(cur.as_i64(), Some(7));
     }
 
     #[test]

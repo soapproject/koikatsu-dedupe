@@ -1,5 +1,7 @@
 //! Classify Koikatsu cards into [Game]/[Male|Female] (or [Game]/[CardType])
-//! folders. Everything here is read-only until `apply` (Task 4).
+//! folders. `plan` only reads — it never touches a card. `apply` is the sole
+//! function in this module that writes, and it MOVES files: no Recycle Bin,
+//! no undo. Everything it does must have been decided by `plan` first.
 
 use crate::card::{read_card, CardError, CardMeta, CardType, DEST_FOLDERS};
 use serde::Serialize;
