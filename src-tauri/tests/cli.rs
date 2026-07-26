@@ -183,3 +183,76 @@ fn cli_organize_dry_run_then_apply() {
 fn app_lib_card_fixture() -> Vec<u8> {
     common::fixture::card("【KoiKatuChara】", 1, "東山", "涼子", Some(19))
 }
+
+/// A `--game-root` that cannot be scanned (bad path) must not be silently
+/// treated as "supports nothing" — that would flag every Sunshine card in
+/// the tree, exactly the guessed supported-set bug `voice_ok` exists to make
+/// visible instead. `voice_ok` must report the failure, and nothing may land
+/// in `voice_incompatible` on its account.
+#[test]
+fn cli_organize_bad_game_root_reports_failure_and_flags_nothing() {
+    let tmp = env::temp_dir().join("kdedupe_organize_voice_fail");
+    let _ = fs::remove_dir_all(&tmp);
+    let root = tmp.join("root");
+    fs::create_dir_all(&root).unwrap();
+    // A Sunshine card with a personality: the population a failed scan would
+    // wrongly flag if it were ever mistaken for "install supports nothing".
+    fs::write(
+        root.join("c.png"),
+        common::fixture::card("【KoiKatuCharaSun】", 1, "山田", "花子", Some(5)),
+    )
+    .unwrap();
+    let bad_game_root = tmp.join("no_such_game_install");
+    let root_s = root.to_str().unwrap();
+    let game_root_s = bad_game_root.to_str().unwrap();
+
+    let d = json(&["organize", "--root", root_s, "--game-root", game_root_s]);
+    assert_eq!(d["voice_ok"], false, "an unscannable game root must report a failed scan");
+    assert_eq!(
+        d["voice_incompatible"].as_array().unwrap().len(),
+        0,
+        "a failed scan must not flag any card"
+    );
+}
+
+/// A `--game-root` that CAN be scanned distinguishes a supported personality
+/// from an unsupported one: `voice_ok` reports success, and only the card
+/// whose personality is absent from the install's `pcm` folders is flagged.
+#[test]
+fn cli_organize_good_game_root_flags_only_unsupported_personality() {
+    let tmp = env::temp_dir().join("kdedupe_organize_voice_ok");
+    let _ = fs::remove_dir_all(&tmp);
+    let root = tmp.join("root");
+    fs::create_dir_all(&root).unwrap();
+
+    // A synthesised install that supports only personality 0 — no real game
+    // files needed, just the folder shape voice_support() reads.
+    let game_root = tmp.join("game");
+    fs::create_dir_all(game_root.join("abdata").join("sound").join("data").join("pcm").join("c00")).unwrap();
+
+    fs::write(
+        root.join("supported.png"),
+        common::fixture::card("【KoiKatuCharaSun】", 1, "東", "支援", Some(0)),
+    )
+    .unwrap();
+    fs::write(
+        root.join("unsupported.png"),
+        common::fixture::card("【KoiKatuCharaSun】", 1, "西", "非支援", Some(5)),
+    )
+    .unwrap();
+
+    let root_s = root.to_str().unwrap();
+    let game_root_s = game_root.to_str().unwrap();
+    let d = json(&["organize", "--root", root_s, "--game-root", game_root_s]);
+    assert_eq!(d["voice_ok"], true, "a readable pcm folder is a successful scan");
+    let flagged = d["voice_incompatible"].as_array().unwrap();
+    assert_eq!(
+        flagged.len(),
+        1,
+        "only the unsupported-personality card should be flagged, got {flagged:?}"
+    );
+    assert!(
+        flagged[0]["path"].as_str().unwrap().contains("unsupported.png"),
+        "the flagged card must be the unsupported one, got {flagged:?}"
+    );
+}

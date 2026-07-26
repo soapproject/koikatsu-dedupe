@@ -8,7 +8,11 @@
 // crate, so items the CLI's own call graph never reaches (e.g. msgpack's
 // cursor position getter) would otherwise warn as dead code. Silenced at the
 // mod boundary rather than upstream, so the shared source files stay clean
-// for the lib crate's own (correct) lint behavior.
+// for the lib crate's own (correct) lint behavior. Being module-level, this
+// also masks any NEW dead code later added to card.rs/msgpack.rs and reached
+// only from the GUI side, not just the three items unused today — there is
+// no narrower fix without editing those shared files, which is out of this
+// task's scope.
 #[path = "msgpack.rs"]
 #[allow(dead_code)]
 mod msgpack;
@@ -129,7 +133,7 @@ fn describe(db: &Path) -> Value {
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
             {"name":"count","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"}],"output":"int"},
             {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
-            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,moves,skipped,unrecognized,unreadable,voice_incompatible}; --apply: {moved,already_filed,renamed,errors}"},
+            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,moves,skipped,unrecognized,unreadable,voice_incompatible,voice_source,voice_ok,hint}; --apply: {moved,already_filed,renamed,errors}"},
             {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
     })
