@@ -176,6 +176,20 @@ fn cli_organize_dry_run_then_apply() {
         .map(|c| c["name"].as_str().unwrap())
         .collect();
     assert!(names.contains(&"organize"), "describe must list organize, got {names:?}");
+
+    // describe IS the agent contract, so the one place the report's shape is
+    // surprising must be stated there: with --game-root the buckets overlap.
+    let org = ds["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "organize")
+        .expect("organize entry");
+    let output = org["output"].as_str().unwrap();
+    assert!(
+        output.contains("BOTH skipped and unreadable"),
+        "describe must warn that the buckets overlap under --game-root, got: {output}"
+    );
 }
 
 /// `organize` must NOT inherit the saved-config root fallback. It is the first

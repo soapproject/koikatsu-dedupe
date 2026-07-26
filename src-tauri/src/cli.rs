@@ -134,7 +134,7 @@ fn describe(db: &Path) -> Value {
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
             {"name":"count","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"}],"output":"int"},
             {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
-            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,root,moves,skipped,unrecognized,unreadable,voice_incompatible,voice_source,voice_ok,hint}; --apply: {root,moved,already_filed,renamed,errors}"},
+            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,root,moves,skipped,unrecognized,unreadable,voice_incompatible,voice_source,voice_ok,hint}; --apply: {root,moved,already_filed,renamed,errors}. The dry-run buckets are not disjoint: with --game-root, an already-filed card is voice-checked too, so one that fails to parse appears in BOTH skipped and unreadable (or unrecognized). It is still only skipped — the extra entry reports the read failure, it does not add work"},
             {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
     })
