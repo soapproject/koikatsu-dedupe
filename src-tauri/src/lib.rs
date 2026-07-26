@@ -1,6 +1,7 @@
 pub mod card;
 pub mod core;
 pub mod msgpack;
+pub mod organize;
 
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
