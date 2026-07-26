@@ -119,3 +119,53 @@ fn non_recursive_mode_ignores_subfolders() {
     let p = organize::plan(&root, false);
     assert_eq!(p.moves.len(), 1, "only the top-level card: {p:?}");
 }
+
+/// hamster renamed a colliding card to `c(1).png`, which manufactures exactly
+/// the duplicates this app exists to remove. An identical card already at the
+/// destination means the content is filed — report it, do not file it twice.
+#[test]
+fn a_collision_with_identical_content_is_not_filed_twice() {
+    let root = fresh("collide_same");
+    let bytes = kk_female();
+    put(&root, "incoming/c.png", &bytes);
+    put(&root, "Koikatu/Female/c.png", &bytes);
+
+    let p = organize::plan(&root, true);
+    assert_eq!(p.moves.len(), 1);
+    assert!(matches!(p.moves[0].collision, organize::Collision::AlreadyFiled));
+
+    let r = organize::apply(&p);
+    assert_eq!(r.already_filed, 1);
+    assert_eq!(r.moved, 0);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(
+        !root.join("Koikatu/Female/c(1).png").exists(),
+        "must not manufacture a duplicate"
+    );
+}
+
+/// Different content under the same name is a real conflict: keep both.
+#[test]
+fn a_collision_with_different_content_is_suffixed() {
+    let root = fresh("collide_diff");
+    put(&root, "incoming/c.png", &kk_female());
+    put(&root, "Koikatu/Female/c.png", &card("【KoiKatuChara】", 1, "別", "人", Some(2)));
+
+    let p = organize::plan(&root, true);
+    assert!(matches!(p.moves[0].collision, organize::Collision::Renamed));
+    let r = organize::apply(&p);
+    assert_eq!(r.renamed, 1);
+    assert!(root.join("Koikatu/Female/c.png").exists(), "existing card stays");
+    assert!(root.join("Koikatu/Female/c (2).png").exists(), "incoming card kept under a new name");
+}
+
+#[test]
+fn apply_moves_the_card_and_creates_the_destination_folder() {
+    let root = fresh("apply_plain");
+    let src = put(&root, "Koikatu_F_20260101000000000_x/card/c.png", &kk_female());
+    let p = organize::plan(&root, true);
+    let r = organize::apply(&p);
+    assert_eq!(r.moved, 1, "{:?}", r.errors);
+    assert!(!src.exists(), "source must be gone (move, not copy)");
+    assert!(root.join("Koikatu/Female/c.png").exists());
+}

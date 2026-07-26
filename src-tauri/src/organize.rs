@@ -6,10 +6,29 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Serialize, PartialEq, Eq, Clone, Copy)]
+pub enum Collision {
+    /// Nothing at the destination name.
+    None,
+    /// Same name, byte-identical content — the card is already filed.
+    AlreadyFiled,
+    /// Same name, different content — file the incoming card under a new name.
+    Renamed,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Planned {
     pub from: PathBuf,
     pub to: PathBuf,
+    pub collision: Collision,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct ApplyResult {
+    pub moved: usize,
+    pub already_filed: usize,
+    pub renamed: usize,
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -144,6 +163,83 @@ fn walk(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>, errors: &mut Vec<Un
     }
 }
 
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) if ma.len() == mb.len() => match (fs::read(a), fs::read(b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Windows treats `A.png` and `a.png` as one file, so a destination name must
+/// be matched case-insensitively or a "new" name would silently overwrite.
+fn existing_case_insensitive(dir: &Path, name: &str) -> Option<PathBuf> {
+    let rd = fs::read_dir(dir).ok()?;
+    for e in rd.flatten() {
+        if e.file_name().to_string_lossy().eq_ignore_ascii_case(name) {
+            return Some(e.path());
+        }
+    }
+    None
+}
+
+/// `c.png` -> `c (2).png`, `c (3).png`, … skipping names already taken.
+fn suffixed(dir: &Path, name: &str) -> PathBuf {
+    let p = Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let ext = p.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    for n in 2..10_000 {
+        let cand = if ext.is_empty() {
+            format!("{stem} ({n})")
+        } else {
+            format!("{stem} ({n}).{ext}")
+        };
+        if existing_case_insensitive(dir, &cand).is_none() {
+            return dir.join(cand);
+        }
+    }
+    dir.join(name)
+}
+
+pub fn apply(plan: &Plan) -> ApplyResult {
+    let mut r = ApplyResult::default();
+    for m in &plan.moves {
+        match m.collision {
+            Collision::AlreadyFiled => {
+                r.already_filed += 1;
+                continue;
+            }
+            Collision::None | Collision::Renamed => {}
+        }
+        let dir = match m.to.parent() {
+            Some(d) => d,
+            None => {
+                r.errors.push(format!("{}: destination has no parent", m.to.display()));
+                continue;
+            }
+        };
+        if let Err(e) = fs::create_dir_all(dir) {
+            r.errors.push(format!("{}: {e}", dir.display()));
+            continue;
+        }
+        // rename() fails across volumes; fall back to copy + remove.
+        let moved = fs::rename(&m.from, &m.to).is_ok()
+            || (fs::copy(&m.from, &m.to).is_ok() && fs::remove_file(&m.from).is_ok());
+        if !moved {
+            r.errors.push(format!("{} -> {}: move failed", m.from.display(), m.to.display()));
+            continue;
+        }
+        if m.collision == Collision::Renamed {
+            r.renamed += 1;
+        } else {
+            r.moved += 1;
+        }
+    }
+    r
+}
+
 pub fn plan(root: &Path, recursive: bool) -> Plan {
     let mut files = Vec::new();
     let mut p = Plan::default();
@@ -168,8 +264,14 @@ pub fn plan(root: &Path, recursive: bool) -> Plan {
             Some(n) => n.to_os_string(),
             None => continue,
         };
-        let to = destination(root, &meta).join(name);
-        p.moves.push(Planned { from: f, to });
+        let dir = destination(root, &meta);
+        let name_s = name.to_string_lossy().to_string();
+        let (to, collision) = match existing_case_insensitive(&dir, &name_s) {
+            None => (dir.join(&name_s), Collision::None),
+            Some(ex) if same_bytes(&f, &ex) => (ex, Collision::AlreadyFiled),
+            Some(_) => (suffixed(&dir, &name_s), Collision::Renamed),
+        };
+        p.moves.push(Planned { from: f, to, collision });
     }
     p
 }
