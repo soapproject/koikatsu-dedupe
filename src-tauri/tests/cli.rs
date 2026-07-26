@@ -4,6 +4,8 @@
 //! pins the safety contract: dry-run must not touch the disk. Skips when the
 //! local-only testdata fixtures are absent.
 
+mod common;
+
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -140,4 +142,44 @@ fn cli_config_fallback() {
         .expect("run kdedupe");
     let v2: Value = serde_json::from_slice(&out2.stdout).unwrap();
     assert_eq!(v2["resolved"]["mode"], "byte", "flag overrides config");
+}
+
+/// organize is dry-run by default — the same safety contract as delete.
+#[test]
+fn cli_organize_dry_run_then_apply() {
+    let tmp = env::temp_dir().join("kdedupe_organize_cli");
+    let _ = fs::remove_dir_all(&tmp);
+    let root = tmp.join("root");
+    let deep = root.join("Koikatu_F_20260101000000000_x").join("card");
+    fs::create_dir_all(&deep).unwrap();
+    fs::write(deep.join("c.png"), app_lib_card_fixture()).unwrap();
+    let root_s = root.to_str().unwrap();
+
+    // dry-run: reports the move, touches nothing
+    let d = json(&["organize", "--root", root_s, "--recursive"]);
+    assert_eq!(d["dry_run"], true, "organize must default to dry-run");
+    assert_eq!(d["moves"].as_array().unwrap().len(), 1, "the card-pack folder must be seen");
+    assert!(deep.join("c.png").exists(), "dry-run must not move anything");
+
+    // apply: files the card
+    let a = json(&["organize", "--root", root_s, "--recursive", "--apply"]);
+    assert_eq!(a["moved"], 1);
+    assert!(root.join("Koikatu").join("Female").join("c.png").exists());
+    assert!(!deep.join("c.png").exists());
+
+    // describe advertises the command so an agent can discover it
+    let ds = json(&["describe"]);
+    let names: Vec<&str> = ds["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"organize"), "describe must list organize, got {names:?}");
+}
+
+/// Same synthesiser the other test crates use — the CLI test drives the built
+/// binary but still builds its input in-process.
+fn app_lib_card_fixture() -> Vec<u8> {
+    common::fixture::card("【KoiKatuChara】", 1, "東山", "涼子", Some(19))
 }

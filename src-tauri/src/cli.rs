@@ -3,8 +3,22 @@
 //! subsystem (no `windows_subsystem="windows"`), so stdout works in a shell.
 //! ponytail: hand-rolled arg parse; switch to clap past ~a dozen subcommands.
 
+// card/msgpack are `pub` in the GUI's lib crate, where unused items are part
+// of a public API and not lint-worthy; here they're private to this binary
+// crate, so items the CLI's own call graph never reaches (e.g. msgpack's
+// cursor position getter) would otherwise warn as dead code. Silenced at the
+// mod boundary rather than upstream, so the shared source files stay clean
+// for the lib crate's own (correct) lint behavior.
+#[path = "msgpack.rs"]
+#[allow(dead_code)]
+mod msgpack;
+#[path = "card.rs"]
+#[allow(dead_code)]
+mod card;
 #[path = "core.rs"]
 mod core;
+#[path = "organize.rs"]
+mod organize;
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -26,6 +40,7 @@ COMMANDS:
   strings --path PNG                                       readable card strings (JSON)
   count  --root DIR [--recursive]                           number of pngs (subtree if --recursive)
   delete --root DIR [--db P] NAME...                        DRY-RUN; add --apply to delete
+  organize --root DIR [--recursive] [--game-root DIR]      DRY-RUN; add --apply to move
   config                                                    show resolved root/db/mode (JSON)
   describe                                                  machine-readable manifest (JSON)
   --help | --version
@@ -114,6 +129,7 @@ fn describe(db: &Path) -> Value {
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
             {"name":"count","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"}],"output":"int"},
             {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
+            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,moves,skipped,unrecognized,unreadable,voice_incompatible}; --apply: {moved,already_filed,renamed,errors}"},
             {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
     })
@@ -240,6 +256,42 @@ pub fn run(argv: &[String]) -> i32 {
                 }
             } else {
                 out(json!({"dry_run":true,"would_delete":names,"count":names.len(),"hint":"re-run with --apply to delete (to Recycle Bin)"}));
+                0
+            }
+        }
+        "organize" => {
+            let root = match need_root("organize") {
+                Ok(r) => r,
+                Err(c) => return c,
+            };
+            let recursive = flags.contains_key("recursive");
+            let support = flags.get("game-root").map(|g| organize::voice_support(Path::new(g)));
+            let p = organize::plan(&root, recursive, support.as_ref());
+            if flags.contains_key("apply") {
+                let r = organize::apply(&p);
+                out(json!({
+                    "moved": r.moved,
+                    "already_filed": r.already_filed,
+                    "renamed": r.renamed,
+                    "errors": r.errors,
+                }));
+                if r.errors.is_empty() {
+                    0
+                } else {
+                    1
+                }
+            } else {
+                out(json!({
+                    "dry_run": true,
+                    "moves": p.moves,
+                    "skipped": p.skipped,
+                    "unrecognized": p.unrecognized,
+                    "unreadable": p.unreadable,
+                    "voice_incompatible": p.voice_incompatible,
+                    "voice_source": support.as_ref().map(|s| s.source.clone()),
+                    "voice_ok": support.as_ref().map(|s| s.ok),
+                    "hint": "re-run with --apply to move the cards",
+                }));
                 0
             }
         }
