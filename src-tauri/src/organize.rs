@@ -305,19 +305,34 @@ fn collision_scan_error_to_reason(err: CollisionScanError) -> String {
 
 /// Windows treats `A.png` and `a.png` as one file, so a destination name must
 /// be matched case-insensitively or a "new" name would silently overwrite.
-/// `Ok(None)` covers both "nothing there" and "the directory doesn't exist
-/// yet" (nothing has been filed there, so there is nothing to collide with).
-/// `Err` means a per-entry enumeration failure made the answer unknowable —
-/// the caller must not treat that as "no collision".
+/// `Ok(None)` means "nothing there" — including the destination directory not
+/// existing YET (`NotFound`), where nothing has been filed, so there is
+/// nothing to collide with. Every OTHER `read_dir` failure (a dropped network
+/// share, an ACL that denies list while permitting write) leaves the answer
+/// unknowable and must be an `Err`: treating it as "no collision" is what
+/// turns `apply`'s `fs::rename` into a silent overwrite of a card that is
+/// there but was never seen. Same rule for a per-entry enumeration failure.
 fn existing_case_insensitive(dir: &Path, name: &str) -> Result<Option<PathBuf>, String> {
     let rd = match fs::read_dir(dir) {
         Ok(rd) => rd,
-        Err(_) => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(format!(
+                "{}: the destination directory could not be listed ({e}), so it is unknown whether a card named {name:?} is already there",
+                dir.display()
+            ));
+        }
     };
+    // Windows' own folding table is not `to_lowercase`, but over-matching only
+    // ever moves a case from "no collision" to "collision detected" — the safe
+    // direction. `eq_ignore_ascii_case` under-matches instead: `Ç.png` and
+    // `ç.png` are one file on Windows, and calling them distinct hands `apply`
+    // two destinations that are really one.
+    let want = name.to_lowercase();
     for res in rd {
         match res {
             Ok(e) => {
-                if e.file_name().to_string_lossy().eq_ignore_ascii_case(name) {
+                if e.file_name().to_string_lossy().to_lowercase() == want {
                     return Ok(Some(e.path()));
                 }
             }
@@ -342,8 +357,13 @@ struct Claim {
     source: PathBuf,
 }
 
+/// Folds a destination name to the key two claims collide on. Must agree with
+/// `existing_case_insensitive`'s comparison, and must fold NON-ASCII case too:
+/// `Ç.png` and `ç.png` are one file on Windows, so two pending sources named
+/// that way must be resolved against each other rather than each planning a
+/// move to "its own" name that `apply` then collapses into one overwrite.
 fn claim_key(name: &str) -> String {
-    name.to_ascii_lowercase()
+    name.to_lowercase()
 }
 
 /// `c.png` -> `c (2).png`, `c (3).png`, … skipping names already taken on
@@ -436,6 +456,22 @@ pub fn apply(plan: &Plan) -> ApplyResult {
                 continue;
             }
             Collision::None | Collision::Renamed => {}
+        }
+        // The plan said this name was free. Verify it still is, immediately
+        // before the rename that would otherwise overwrite whatever is there:
+        // `fs::rename` replaces the destination silently on both Windows
+        // (MOVEFILE_REPLACE_EXISTING) and POSIX, so any mismatch between plan
+        // and reality — a plan gone stale, a file created since, or a planning
+        // bug that ever mistakes "unknown" for "free" — destroys a card and
+        // reports a clean move. `AlreadyFiled` returned above, so this cannot
+        // fire on the legitimate same-content case.
+        if m.to.exists() {
+            r.errors.push(format!(
+                "{} -> {}: the destination already exists although the plan found it free; nothing was moved — re-run the dry-run to re-plan",
+                m.from.display(),
+                m.to.display()
+            ));
+            continue;
         }
         let dir = match m.to.parent() {
             Some(d) => d,
@@ -599,6 +635,45 @@ mod tests {
         let reason = collision_scan_error_to_reason(CollisionScanError { dir: dir.clone(), source });
         assert!(reason.contains("name collision"), "{reason}");
         assert!(reason.contains("access denied"), "{reason}");
+    }
+
+    /// A destination directory that does not exist yet genuinely has nothing
+    /// in it to collide with — that, and only that, is the `Ok(None)` case.
+    #[test]
+    fn a_missing_destination_directory_is_no_collision() {
+        let dir = std::env::temp_dir().join("kdedupe_no_such_dest_dir_ever");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(existing_case_insensitive(&dir, "c.png").unwrap(), None);
+    }
+
+    /// Any OTHER `read_dir` failure (a dropped share, a list-denying ACL) makes
+    /// the collision status UNKNOWN and must be an `Err`. Reporting "no
+    /// collision" there is what lets `apply` rename over a card it never saw.
+    /// A path that is a file rather than a directory is the one such failure
+    /// reproducible portably (`ENOTDIR` / `ERROR_DIRECTORY`, never `NotFound`).
+    #[test]
+    fn a_destination_directory_that_cannot_be_listed_is_unknown_not_no_collision() {
+        let base = std::env::temp_dir().join("kdedupe_unlistable_dest");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let not_a_dir = base.join("i_am_a_file");
+        fs::write(&not_a_dir, b"x").unwrap();
+        let err = existing_case_insensitive(&not_a_dir, "c.png")
+            .expect_err("an unlistable directory must not read as \"no collision\"");
+        assert!(err.contains("could not be listed"), "{err}");
+        assert!(err.contains("c.png"), "{err}");
+    }
+
+    /// Windows folds case beyond ASCII: `Ç.png` and `ç.png` are one file. Two
+    /// pending sources named that way must land on the same claim key, or each
+    /// plans a move to "its own" name and `apply` collapses them into one
+    /// silent overwrite.
+    #[test]
+    fn claim_key_folds_non_ascii_case_too() {
+        assert_eq!(claim_key("Ç.png"), claim_key("ç.png"));
+        assert_eq!(claim_key("ÄÖÜ.PNG"), claim_key("äöü.png"));
+        // ASCII folding must be unchanged.
+        assert_eq!(claim_key("C.PNG"), claim_key("c.png"));
     }
 
     /// If every `name (N)` slot up to the search cap is already claimed,

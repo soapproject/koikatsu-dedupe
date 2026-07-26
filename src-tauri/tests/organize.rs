@@ -262,6 +262,71 @@ fn apply_reports_unresolvable_as_an_error_without_touching_the_filesystem() {
     assert!(!to.exists(), "nothing must be written for an unresolvable collision");
 }
 
+/// A destination directory that cannot be LISTED (a dropped network share, an
+/// ACL that denies list while permitting write — reproduced portably here by a
+/// file sitting where the directory should be) leaves the collision status
+/// unknown. Reporting it as "no collision" plans a move whose `fs::rename`
+/// silently replaces a card that was there all along, with an empty `errors`
+/// and a clean `{"moved": N}`. It must be reported and nothing may be planned.
+#[test]
+fn an_unlistable_destination_directory_is_reported_not_treated_as_free() {
+    let root = fresh("dest_unlistable");
+    let src = put(&root, "in/c.png", &kk_female());
+    // Where `Koikatu/Female/` should be, put a FILE: read_dir then fails with
+    // something that is emphatically not NotFound.
+    let blocker = put(&root, "Koikatu/Female", b"not a directory");
+
+    let p = organize::plan(&root, true, None);
+    assert!(p.moves.is_empty(), "an unknown collision status must plan no move: {p:?}");
+    assert_eq!(p.unreadable.len(), 1, "{p:?}");
+    assert_eq!(p.unreadable[0].path, src);
+    assert!(
+        p.unreadable[0].reason.contains("could not be listed"),
+        "{}",
+        p.unreadable[0].reason
+    );
+
+    let r = organize::apply(&p);
+    assert_eq!(r.moved, 0);
+    assert!(r.errors.is_empty(), "nothing was planned, so nothing errors: {:?}", r.errors);
+    assert!(src.exists(), "the source card must be untouched");
+    assert_eq!(fs::read(&blocker).unwrap(), b"not a directory", "the blocker must be untouched");
+}
+
+/// The backstop for every residual plan/reality mismatch, including genuine
+/// TOCTOU: `fs::rename` replaces the destination silently on both Windows and
+/// POSIX, so `apply` must verify the destination is still free instead of
+/// trusting the plan. Without the guard this test destroys `victim` and
+/// reports a clean move.
+#[test]
+fn apply_refuses_to_move_onto_a_destination_that_exists_despite_the_plan() {
+    for (name, collision) in [
+        ("apply_guard_none", organize::Collision::None),
+        ("apply_guard_renamed", organize::Collision::Renamed),
+    ] {
+        let root = fresh(name);
+        let from = put(&root, "in/c.png", &kk_female());
+        let victim_bytes = card("【KoiKatuChara】", 1, "別", "人", Some(2));
+        let to = put(&root, "Koikatu/Female/c.png", &victim_bytes);
+
+        let p = organize::Plan {
+            moves: vec![organize::Planned { from: from.clone(), to: to.clone(), collision }],
+            ..Default::default()
+        };
+        let r = organize::apply(&p);
+
+        assert_eq!(r.errors.len(), 1, "{collision:?}: {:?}", r.errors);
+        assert_eq!(r.moved, 0, "{collision:?}");
+        assert_eq!(r.renamed, 0, "{collision:?}");
+        assert_eq!(
+            fs::read(&to).unwrap(),
+            victim_bytes,
+            "{collision:?}: the card already at the destination must survive"
+        );
+        assert!(from.exists(), "{collision:?}: the source must be untouched");
+    }
+}
+
 /// A KKS card whose personality the target KK install cannot voice converts
 /// cleanly and then loads with no voice at all — silently. Surface it before
 /// the conversion step, never after.
