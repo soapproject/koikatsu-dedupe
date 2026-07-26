@@ -127,7 +127,7 @@ fn non_recursive_mode_ignores_subfolders() {
 fn a_collision_with_identical_content_is_not_filed_twice() {
     let root = fresh("collide_same");
     let bytes = kk_female();
-    put(&root, "incoming/c.png", &bytes);
+    let incoming = put(&root, "incoming/c.png", &bytes);
     put(&root, "Koikatu/Female/c.png", &bytes);
 
     let p = organize::plan(&root, true);
@@ -141,6 +141,10 @@ fn a_collision_with_identical_content_is_not_filed_twice() {
     assert!(
         !root.join("Koikatu/Female/c(1).png").exists(),
         "must not manufacture a duplicate"
+    );
+    assert!(
+        incoming.exists(),
+        "AlreadyFiled must not touch the source: nothing is copied, nothing is deleted"
     );
 }
 
@@ -168,4 +172,92 @@ fn apply_moves_the_card_and_creates_the_destination_folder() {
     assert_eq!(r.moved, 1, "{:?}", r.errors);
     assert!(!src.exists(), "source must be gone (move, not copy)");
     assert!(root.join("Koikatu/Female/c.png").exists());
+}
+
+/// THE Critical fix: planning never touches the filesystem, only `apply`
+/// does. Two incoming files that map to the SAME destination name must be
+/// resolved against each other during `plan`, not each independently against
+/// an unchanged disk — otherwise `apply`'s `fs::rename` silently clobbers the
+/// first with the second and `ApplyResult.errors` stays empty.
+#[test]
+fn two_pending_sources_with_identical_content_at_the_same_destination_are_filed_once() {
+    let root = fresh("pending_same");
+    let bytes = kk_female();
+    let a = put(&root, "A/c.png", &bytes);
+    let b = put(&root, "B/c.png", &bytes);
+
+    let p = organize::plan(&root, true);
+    assert_eq!(p.moves.len(), 2, "{p:?}");
+    assert!(matches!(p.moves[0].collision, organize::Collision::None));
+    assert!(matches!(p.moves[1].collision, organize::Collision::AlreadyFiled));
+    assert_eq!(
+        p.moves[0].to, p.moves[1].to,
+        "both plan entries must target the same destination name"
+    );
+
+    let r = organize::apply(&p);
+    assert_eq!(r.moved, 1, "{:?}", r.errors);
+    assert_eq!(r.already_filed, 1);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+
+    assert!(!a.exists(), "the filed copy's source is gone (moved)");
+    assert!(b.exists(), "the already-filed copy's source is untouched");
+    assert!(root.join("Koikatu/Female/c.png").exists());
+    assert_eq!(fs::read(root.join("Koikatu/Female/c.png")).unwrap(), bytes);
+    assert!(
+        !root.join("Koikatu/Female/c (2).png").exists(),
+        "identical content must not manufacture a second copy under a new name"
+    );
+}
+
+/// Same setup, but the two pending sources genuinely differ: both must
+/// survive, under distinct names, exactly as a same-name-on-disk conflict
+/// already does — the fix must not merge or drop either one.
+#[test]
+fn two_pending_sources_with_different_content_at_the_same_destination_are_both_kept() {
+    let root = fresh("pending_diff");
+    let bytes_a = kk_female();
+    let bytes_b = card("【KoiKatuChara】", 1, "別", "人", Some(2));
+    let a = put(&root, "A/c.png", &bytes_a);
+    let b = put(&root, "B/c.png", &bytes_b);
+
+    let p = organize::plan(&root, true);
+    assert_eq!(p.moves.len(), 2, "{p:?}");
+    assert!(matches!(p.moves[0].collision, organize::Collision::None));
+    assert!(matches!(p.moves[1].collision, organize::Collision::Renamed));
+    assert_ne!(
+        p.moves[0].to, p.moves[1].to,
+        "differing content must land under distinct names"
+    );
+
+    let r = organize::apply(&p);
+    assert_eq!(r.moved, 1, "{:?}", r.errors);
+    assert_eq!(r.renamed, 1, "{:?}", r.errors);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+
+    assert!(!a.exists() && !b.exists(), "both sources moved");
+    assert_eq!(fs::read(root.join("Koikatu/Female/c.png")).unwrap(), bytes_a);
+    assert_eq!(fs::read(root.join("Koikatu/Female/c (2).png")).unwrap(), bytes_b);
+}
+
+/// `Collision::Unresolvable` (every suffix slot exhausted) must be reported
+/// as an error and must never touch the filesystem — not moved, not
+/// counted, and the destination it names must stay untouched.
+#[test]
+fn apply_reports_unresolvable_as_an_error_without_touching_the_filesystem() {
+    let root = fresh("unresolvable");
+    let from = put(&root, "incoming.png", &kk_female());
+    let to = root.join("Koikatu/Female/c.png");
+    let p = organize::Plan {
+        moves: vec![organize::Planned { from: from.clone(), to: to.clone(), collision: organize::Collision::Unresolvable }],
+        ..Default::default()
+    };
+
+    let r = organize::apply(&p);
+    assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+    assert_eq!(r.moved, 0);
+    assert_eq!(r.renamed, 0);
+    assert_eq!(r.already_filed, 0);
+    assert!(from.exists(), "source must be untouched");
+    assert!(!to.exists(), "nothing must be written for an unresolvable collision");
 }

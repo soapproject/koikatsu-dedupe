@@ -3,6 +3,7 @@
 
 use crate::card::{read_card, CardError, CardMeta, CardType, DEST_FOLDERS};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,11 @@ pub enum Collision {
     AlreadyFiled,
     /// Same name, different content — file the incoming card under a new name.
     Renamed,
+    /// Same name, different content, and every `name (N)` slot up to the
+    /// search cap is taken (by disk or by another file in this same plan).
+    /// There is no safe destination to hand back, so nothing is planned to
+    /// move — `apply` reports this as an error instead of guessing.
+    Unresolvable,
 }
 
 #[derive(Debug, Serialize)]
@@ -173,20 +179,84 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Windows treats `A.png` and `a.png` as one file, so a destination name must
-/// be matched case-insensitively or a "new" name would silently overwrite.
-fn existing_case_insensitive(dir: &Path, name: &str) -> Option<PathBuf> {
-    let rd = fs::read_dir(dir).ok()?;
-    for e in rd.flatten() {
-        if e.file_name().to_string_lossy().eq_ignore_ascii_case(name) {
-            return Some(e.path());
-        }
-    }
-    None
+/// A per-entry failure encountered while scanning a destination directory for
+/// a name collision — the same failure class `WalkError::Enumeration` guards
+/// against in `walk`, just triggered by a `read_dir` used for a different
+/// purpose. No path is available for the specific entry that failed, only
+/// the directory being scanned.
+struct CollisionScanError {
+    dir: PathBuf,
+    source: std::io::Error,
 }
 
-/// `c.png` -> `c (2).png`, `c (3).png`, … skipping names already taken.
-fn suffixed(dir: &Path, name: &str) -> PathBuf {
+/// Maps a collision-scan enumeration failure to an error string. Kept as a
+/// standalone pure function, mirroring `walk_error_to_unreadable`, so the
+/// mapping is unit-testable even though the underlying OS failure it handles
+/// is not portably reproducible in a test (see `mod tests` below). The
+/// caller MUST treat this as "collision status unknown", never as "no
+/// collision" — silently assuming no collision here is exactly the class of
+/// bug `apply` would then turn into a silent overwrite.
+fn collision_scan_error_to_reason(err: CollisionScanError) -> String {
+    format!(
+        "{}: could not enumerate an entry while checking for a name collision: {}",
+        err.dir.display(),
+        err.source
+    )
+}
+
+/// Windows treats `A.png` and `a.png` as one file, so a destination name must
+/// be matched case-insensitively or a "new" name would silently overwrite.
+/// `Ok(None)` covers both "nothing there" and "the directory doesn't exist
+/// yet" (nothing has been filed there, so there is nothing to collide with).
+/// `Err` means a per-entry enumeration failure made the answer unknowable —
+/// the caller must not treat that as "no collision".
+fn existing_case_insensitive(dir: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    let rd = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return Ok(None),
+    };
+    for res in rd {
+        match res {
+            Ok(e) => {
+                if e.file_name().to_string_lossy().eq_ignore_ascii_case(name) {
+                    return Ok(Some(e.path()));
+                }
+            }
+            Err(source) => {
+                return Err(collision_scan_error_to_reason(CollisionScanError {
+                    dir: dir.to_path_buf(),
+                    source,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// A destination name already spoken for during the current `plan()` pass,
+/// before anything has actually moved. `source` is the original (still
+/// unmoved) file that claimed it, so a later collision against the same name
+/// can be resolved by content without touching a destination file that
+/// doesn't exist yet.
+struct Claim {
+    dest: PathBuf,
+    source: PathBuf,
+}
+
+fn claim_key(name: &str) -> String {
+    name.to_ascii_lowercase()
+}
+
+/// `c.png` -> `c (2).png`, `c (3).png`, … skipping names already taken on
+/// disk OR already claimed earlier in this same plan. `Ok(None)` means the
+/// search space (2..10_000) is exhausted — the caller must not fall back to
+/// the colliding name, since that is precisely the name this function exists
+/// to avoid handing back.
+fn suffixed(
+    dir: &Path,
+    name: &str,
+    claims: &HashMap<String, Claim>,
+) -> Result<Option<PathBuf>, String> {
     let p = Path::new(name);
     let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let ext = p.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
@@ -196,11 +266,58 @@ fn suffixed(dir: &Path, name: &str) -> PathBuf {
         } else {
             format!("{stem} ({n}).{ext}")
         };
-        if existing_case_insensitive(dir, &cand).is_none() {
-            return dir.join(cand);
+        if claims.contains_key(&claim_key(&cand)) {
+            continue;
+        }
+        if existing_case_insensitive(dir, &cand)?.is_none() {
+            return Ok(Some(dir.join(cand)));
         }
     }
-    dir.join(name)
+    Ok(None)
+}
+
+/// Resolves where `source` (named `name`, destined for `dir`) should land,
+/// checking both the live filesystem AND every name already claimed earlier
+/// in this same `plan()` pass — otherwise two incoming files that map to the
+/// same destination name would each independently see an empty/differing
+/// destination and `apply` would silently clobber one with the other.
+/// `claims` is the running set of names already spoken for in `dir`; a
+/// successful resolution (`None` or `Renamed`) registers its own claim
+/// before returning. `Err` means a collision could not be determined safely
+/// (an enumeration failure) — the caller must not plan a move in that case.
+fn resolve_collision(
+    dir: &Path,
+    name_s: &str,
+    source: &Path,
+    claims: &mut HashMap<String, Claim>,
+) -> Result<(PathBuf, Collision), String> {
+    let key = claim_key(name_s);
+    let occupant = match claims.get(&key) {
+        Some(c) => Some((c.dest.clone(), c.source.clone())),
+        None => existing_case_insensitive(dir, name_s)?.map(|p| (p.clone(), p)),
+    };
+
+    match occupant {
+        None => {
+            let dest = dir.join(name_s);
+            claims.insert(key, Claim { dest: dest.clone(), source: source.to_path_buf() });
+            Ok((dest, Collision::None))
+        }
+        Some((dest, content_ref)) if same_bytes(source, &content_ref) => {
+            Ok((dest, Collision::AlreadyFiled))
+        }
+        Some(_) => match suffixed(dir, name_s, claims)? {
+            Some(dest) => {
+                let cand_name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                claims.insert(claim_key(&cand_name), Claim {
+                    dest: dest.clone(),
+                    source: source.to_path_buf(),
+                });
+                Ok((dest, Collision::Renamed))
+            }
+            None => Ok((dir.join(name_s), Collision::Unresolvable)),
+        },
+    }
 }
 
 pub fn apply(plan: &Plan) -> ApplyResult {
@@ -209,6 +326,14 @@ pub fn apply(plan: &Plan) -> ApplyResult {
         match m.collision {
             Collision::AlreadyFiled => {
                 r.already_filed += 1;
+                continue;
+            }
+            Collision::Unresolvable => {
+                r.errors.push(format!(
+                    "{}: could not find a free destination name near \"{}\" (every \"name (N)\" slot up to the search cap is taken)",
+                    m.from.display(),
+                    m.to.display()
+                ));
                 continue;
             }
             Collision::None | Collision::Renamed => {}
@@ -224,11 +349,36 @@ pub fn apply(plan: &Plan) -> ApplyResult {
             r.errors.push(format!("{}: {e}", dir.display()));
             continue;
         }
-        // rename() fails across volumes; fall back to copy + remove.
-        let moved = fs::rename(&m.from, &m.to).is_ok()
-            || (fs::copy(&m.from, &m.to).is_ok() && fs::remove_file(&m.from).is_ok());
+        // rename() fails across volumes; fall back to copy + remove. If the
+        // copy lands but the source can't be removed, the card now exists in
+        // two places — that must be reported plainly, not folded into a
+        // generic "move failed" (the move DID partly succeed).
+        let moved = match fs::rename(&m.from, &m.to) {
+            Ok(()) => true,
+            Err(_) => match fs::copy(&m.from, &m.to) {
+                Ok(_) => match fs::remove_file(&m.from) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        r.errors.push(format!(
+                            "{} -> {}: copied successfully but the source file could not be removed ({e}); delete {} manually to finish the move",
+                            m.from.display(),
+                            m.to.display(),
+                            m.from.display()
+                        ));
+                        false
+                    }
+                },
+                Err(e) => {
+                    r.errors.push(format!(
+                        "{} -> {}: move failed ({e})",
+                        m.from.display(),
+                        m.to.display()
+                    ));
+                    false
+                }
+            },
+        };
         if !moved {
-            r.errors.push(format!("{} -> {}: move failed", m.from.display(), m.to.display()));
             continue;
         }
         if m.collision == Collision::Renamed {
@@ -244,6 +394,11 @@ pub fn plan(root: &Path, recursive: bool) -> Plan {
     let mut files = Vec::new();
     let mut p = Plan::default();
     walk(root, recursive, &mut files, &mut p.unreadable);
+    // Tracks, per destination directory, the names already claimed during
+    // THIS pass — the live filesystem alone isn't enough since planning
+    // never moves anything; two incoming files bound for the same name must
+    // be resolved against each other, not both against an unchanged disk.
+    let mut claims: HashMap<PathBuf, HashMap<String, Claim>> = HashMap::new();
     for f in files {
         if is_in_dest_folder(root, &f) {
             p.skipped.push(f);
@@ -266,12 +421,11 @@ pub fn plan(root: &Path, recursive: bool) -> Plan {
         };
         let dir = destination(root, &meta);
         let name_s = name.to_string_lossy().to_string();
-        let (to, collision) = match existing_case_insensitive(&dir, &name_s) {
-            None => (dir.join(&name_s), Collision::None),
-            Some(ex) if same_bytes(&f, &ex) => (ex, Collision::AlreadyFiled),
-            Some(_) => (suffixed(&dir, &name_s), Collision::Renamed),
-        };
-        p.moves.push(Planned { from: f, to, collision });
+        let dir_claims = claims.entry(dir.clone()).or_default();
+        match resolve_collision(&dir, &name_s, &f, dir_claims) {
+            Ok((to, collision)) => p.moves.push(Planned { from: f, to, collision }),
+            Err(reason) => p.unreadable.push(Unreadable { path: f, reason }),
+        }
     }
     p
 }
@@ -303,5 +457,61 @@ mod tests {
         assert_eq!(u.path, path);
         assert!(u.reason.contains("file type"), "{}", u.reason);
         assert!(u.reason.contains("access denied"), "{}", u.reason);
+    }
+
+    /// Same failure class as the walk-enumeration case above, just hit while
+    /// scanning a destination directory for a name collision instead. Must
+    /// be reported, never silently folded into "no collision" — that would
+    /// let `apply` overwrite an entry it never actually saw.
+    #[test]
+    fn a_collision_scan_enumeration_failure_is_reported_not_treated_as_no_collision() {
+        let dir = PathBuf::from(r"Z:\cardpacks\broken");
+        let source = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let reason = collision_scan_error_to_reason(CollisionScanError { dir: dir.clone(), source });
+        assert!(reason.contains("name collision"), "{reason}");
+        assert!(reason.contains("access denied"), "{reason}");
+    }
+
+    /// If every `name (N)` slot up to the search cap is already claimed,
+    /// `suffixed` must report exhaustion rather than falling back to the
+    /// original colliding name (which is exactly the overwrite it exists to
+    /// prevent). Uses a nonexistent directory so every disk check is `Ok(None)`
+    /// and only the `claims` map — filled to capacity — drives the result.
+    #[test]
+    fn suffixed_exhaustion_is_reported_not_silently_overwritten() {
+        let dir = PathBuf::from(r"Z:\cardpacks\nonexistent");
+        let mut claims: HashMap<String, Claim> = HashMap::new();
+        for n in 2..10_000 {
+            claims.insert(claim_key(&format!("c ({n}).png")), Claim {
+                dest: PathBuf::new(),
+                source: PathBuf::new(),
+            });
+        }
+        let result = suffixed(&dir, "c.png", &claims).unwrap();
+        assert!(result.is_none(), "every candidate is claimed; must report exhaustion");
+    }
+
+    /// `resolve_collision` must turn that exhaustion into `Collision::Unresolvable`
+    /// rather than silently reusing the colliding destination.
+    #[test]
+    fn resolve_collision_reports_unresolvable_when_every_suffix_is_taken() {
+        let dir = PathBuf::from(r"Z:\cardpacks\nonexistent");
+        let mut claims: HashMap<String, Claim> = HashMap::new();
+        // Something already holds the plain name, with content that will
+        // compare as "different" (the fake path doesn't exist, so
+        // `same_bytes` reads nothing and returns false).
+        claims.insert(claim_key("c.png"), Claim {
+            dest: dir.join("c.png"),
+            source: PathBuf::from("nonexistent-existing-content"),
+        });
+        for n in 2..10_000 {
+            claims.insert(claim_key(&format!("c ({n}).png")), Claim {
+                dest: PathBuf::new(),
+                source: PathBuf::new(),
+            });
+        }
+        let source = PathBuf::from("nonexistent-incoming-content");
+        let (_, collision) = resolve_collision(&dir, "c.png", &source, &mut claims).unwrap();
+        assert_eq!(collision, Collision::Unresolvable);
     }
 }
