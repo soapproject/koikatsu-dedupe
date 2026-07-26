@@ -3,7 +3,7 @@
 
 use crate::card::{read_card, CardError, CardMeta, CardType, DEST_FOLDERS};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -47,6 +47,50 @@ pub struct Unreadable {
 pub struct VoiceIssue {
     pub path: PathBuf,
     pub personality: i64,
+}
+
+/// Which personality ids the target install can actually voice.
+///
+/// Derived from the install, never hardcoded: a personality mod changes the
+/// answer. Scope note — only the base `abdata` tree is read. Sideloader
+/// zipmods could in principle add `sound/data/pcm/c<N>`, but reading them
+/// needs a zip dependency this project does not carry, and a sweep of a real
+/// 20,502-mod install found none doing so (the set was exactly the base
+/// game's contiguous 0-38). `source` records what was actually scanned so a
+/// report never overstates its own coverage.
+#[derive(Debug, Clone)]
+pub struct VoiceSupport {
+    pub ids: BTreeSet<i64>,
+    pub source: String,
+}
+
+/// Reads the personality ids a game install can voice, from its
+/// `abdata/sound/data/pcm/c<N>` folders. Sideloader-added zipmods are not
+/// scanned (see `VoiceSupport` doc) — `source` says so explicitly.
+pub fn voice_support(game_root: &Path) -> VoiceSupport {
+    let dir = game_root.join("abdata").join("sound").join("data").join("pcm");
+    let mut ids = BTreeSet::new();
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            // `c00`..`c38` are personalities; `c-1`, `c-100` etc. are special voices.
+            if let Some(rest) = name.strip_prefix('c') {
+                if let Ok(n) = rest.parse::<i64>() {
+                    if n >= 0 {
+                        ids.insert(n);
+                    }
+                }
+            }
+        }
+    }
+    VoiceSupport {
+        source: format!(
+            "{} ({} personality ids; base abdata only — Sideloader-added personalities are not scanned)",
+            dir.display(),
+            ids.len()
+        ),
+        ids,
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -390,7 +434,7 @@ pub fn apply(plan: &Plan) -> ApplyResult {
     r
 }
 
-pub fn plan(root: &Path, recursive: bool) -> Plan {
+pub fn plan(root: &Path, recursive: bool, voice: Option<&VoiceSupport>) -> Plan {
     let mut files = Vec::new();
     let mut p = Plan::default();
     walk(root, recursive, &mut files, &mut p.unreadable);
@@ -419,6 +463,16 @@ pub fn plan(root: &Path, recursive: bool) -> Plan {
             Some(n) => n.to_os_string(),
             None => continue,
         };
+        // Only Sunshine cards are headed for conversion into KK, so only they
+        // can end up voiceless there. Flagging is a report, not a filter —
+        // the card still gets its normal entry in `moves` below.
+        if meta.game == crate::card::Game::KoikatsuSunshine {
+            if let (Some(v), Some(pid)) = (voice, meta.personality) {
+                if !v.ids.contains(&pid) {
+                    p.voice_incompatible.push(VoiceIssue { path: f.clone(), personality: pid });
+                }
+            }
+        }
         let dir = destination(root, &meta);
         let name_s = name.to_string_lossy().to_string();
         let dir_claims = claims.entry(dir.clone()).or_default();

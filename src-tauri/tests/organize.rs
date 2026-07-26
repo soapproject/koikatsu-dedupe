@@ -38,7 +38,7 @@ fn a_card_pack_folder_whose_name_merely_starts_with_a_game_name_is_organized() {
         "Koikatu_F_20260725003553199_姬野 夜王/card/c.png",
         &kk_female(),
     );
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 1, "card must be seen, not skipped: {p:?}");
     assert_eq!(p.moves[0].from, src);
     assert_eq!(p.moves[0].to, root.join("Koikatu").join("Female").join("c.png"));
@@ -51,7 +51,7 @@ fn a_card_pack_folder_whose_name_merely_starts_with_a_game_name_is_organized() {
 fn a_card_already_in_a_destination_folder_is_skipped() {
     let root = fresh("already");
     let src = put(&root, "Koikatu/Female/c.png", &kk_female());
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert!(p.moves.is_empty(), "already-filed card must not move: {p:?}");
     assert_eq!(p.skipped, vec![src]);
 }
@@ -62,7 +62,7 @@ fn a_card_already_in_a_destination_folder_is_skipped() {
 fn a_bracketed_folder_name_is_walked_normally() {
     let root = fresh("brackets");
     put(&root, "[kk] 御坂セット/c.png", &kk_female());
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 1, "bracketed path must be walked: {p:?}");
 }
 
@@ -70,7 +70,7 @@ fn a_bracketed_folder_name_is_walked_normally() {
 fn a_deep_cjk_path_is_walked_normally() {
     let root = fresh("cjk");
     put(&root, "深層/姫野/カード/日本語 folder/c.png", &kk_female());
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 1, "CJK path must be walked: {p:?}");
 }
 
@@ -88,7 +88,7 @@ fn a_path_longer_than_260_chars_is_walked_normally() {
         return;
     }
     assert!(f.to_string_lossy().len() > 260, "fixture must exceed MAX_PATH");
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 1, "long path must be walked: {p:?}");
 }
 
@@ -96,7 +96,7 @@ fn a_path_longer_than_260_chars_is_walked_normally() {
 fn an_unrecognized_marker_is_reported_and_not_moved() {
     let root = fresh("unknown");
     put(&root, "scene.png", &card("【KStudio】", 1, "a", "b", Some(1)));
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert!(p.moves.is_empty());
     assert_eq!(p.unrecognized.len(), 1);
     assert!(p.unrecognized[0].reason.contains("KStudio"));
@@ -106,7 +106,7 @@ fn an_unrecognized_marker_is_reported_and_not_moved() {
 fn a_non_card_png_is_reported_as_unreadable_and_not_moved() {
     let root = fresh("notcard");
     put(&root, "preview.png", b"\x89PNG\r\n\x1a\nnot really a png body");
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert!(p.moves.is_empty());
     assert_eq!(p.unreadable.len(), 1, "{p:?}");
 }
@@ -116,7 +116,7 @@ fn non_recursive_mode_ignores_subfolders() {
     let root = fresh("nonrec");
     put(&root, "top.png", &kk_female());
     put(&root, "sub/nested.png", &kk_female());
-    let p = organize::plan(&root, false);
+    let p = organize::plan(&root, false, None);
     assert_eq!(p.moves.len(), 1, "only the top-level card: {p:?}");
 }
 
@@ -130,7 +130,7 @@ fn a_collision_with_identical_content_is_not_filed_twice() {
     let incoming = put(&root, "incoming/c.png", &bytes);
     put(&root, "Koikatu/Female/c.png", &bytes);
 
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 1);
     assert!(matches!(p.moves[0].collision, organize::Collision::AlreadyFiled));
 
@@ -155,7 +155,7 @@ fn a_collision_with_different_content_is_suffixed() {
     put(&root, "incoming/c.png", &kk_female());
     put(&root, "Koikatu/Female/c.png", &card("【KoiKatuChara】", 1, "別", "人", Some(2)));
 
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert!(matches!(p.moves[0].collision, organize::Collision::Renamed));
     let r = organize::apply(&p);
     assert_eq!(r.renamed, 1);
@@ -167,7 +167,7 @@ fn a_collision_with_different_content_is_suffixed() {
 fn apply_moves_the_card_and_creates_the_destination_folder() {
     let root = fresh("apply_plain");
     let src = put(&root, "Koikatu_F_20260101000000000_x/card/c.png", &kk_female());
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     let r = organize::apply(&p);
     assert_eq!(r.moved, 1, "{:?}", r.errors);
     assert!(!src.exists(), "source must be gone (move, not copy)");
@@ -186,7 +186,7 @@ fn two_pending_sources_with_identical_content_at_the_same_destination_are_filed_
     let a = put(&root, "A/c.png", &bytes);
     let b = put(&root, "B/c.png", &bytes);
 
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 2, "{p:?}");
     assert!(matches!(p.moves[0].collision, organize::Collision::None));
     assert!(matches!(p.moves[1].collision, organize::Collision::AlreadyFiled));
@@ -221,7 +221,7 @@ fn two_pending_sources_with_different_content_at_the_same_destination_are_both_k
     let a = put(&root, "A/c.png", &bytes_a);
     let b = put(&root, "B/c.png", &bytes_b);
 
-    let p = organize::plan(&root, true);
+    let p = organize::plan(&root, true, None);
     assert_eq!(p.moves.len(), 2, "{p:?}");
     assert!(matches!(p.moves[0].collision, organize::Collision::None));
     assert!(matches!(p.moves[1].collision, organize::Collision::Renamed));
@@ -260,4 +260,51 @@ fn apply_reports_unresolvable_as_an_error_without_touching_the_filesystem() {
     assert_eq!(r.already_filed, 0);
     assert!(from.exists(), "source must be untouched");
     assert!(!to.exists(), "nothing must be written for an unresolvable collision");
+}
+
+/// A KKS card whose personality the target KK install cannot voice converts
+/// cleanly and then loads with no voice at all — silently. Surface it before
+/// the conversion step, never after.
+#[test]
+fn a_kks_card_with_an_unsupported_personality_is_flagged() {
+    let root = fresh("voice");
+    // Fake a game install exposing personalities 0..=2 only.
+    let game = root.join("game");
+    for n in 0..=2 {
+        fs::create_dir_all(game.join(format!("abdata/sound/data/pcm/c{n:02}"))).unwrap();
+    }
+    let support = organize::voice_support(&game);
+    assert_eq!(support.ids.len(), 3, "derived from the install, not hardcoded");
+
+    put(&root, "in/ok.png", &card("【KoiKatuCharaSun】", 1, "a", "b", Some(2)));
+    let bad = put(&root, "in/mute.png", &card("【KoiKatuCharaSun】", 1, "c", "d", Some(77)));
+
+    let p = organize::plan(&root, true, Some(&support));
+    assert_eq!(p.voice_incompatible.len(), 1, "{p:?}");
+    assert_eq!(p.voice_incompatible[0].path, bad);
+    assert_eq!(p.voice_incompatible[0].personality, 77);
+    // Flagging must not stop the card being classified.
+    assert_eq!(p.moves.len(), 2, "both KKS cards still get filed");
+}
+
+/// KK cards are the conversion target, so their personalities are not checked.
+#[test]
+fn a_kk_card_is_never_voice_flagged() {
+    let root = fresh("voice_kk");
+    let game = root.join("game");
+    fs::create_dir_all(game.join("abdata/sound/data/pcm/c00")).unwrap();
+    let support = organize::voice_support(&game);
+    put(&root, "in/kk.png", &card("【KoiKatuChara】", 1, "a", "b", Some(77)));
+    let p = organize::plan(&root, true, Some(&support));
+    assert!(p.voice_incompatible.is_empty(), "{p:?}");
+}
+
+/// Without a game root there is nothing to check against — say so rather than
+/// guessing a supported set.
+#[test]
+fn without_a_game_root_no_voice_claim_is_made() {
+    let root = fresh("voice_none");
+    put(&root, "in/kks.png", &card("【KoiKatuCharaSun】", 1, "a", "b", Some(77)));
+    let p = organize::plan(&root, true, None);
+    assert!(p.voice_incompatible.is_empty());
 }
