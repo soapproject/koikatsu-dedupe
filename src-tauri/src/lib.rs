@@ -1,4 +1,5 @@
 pub mod core;
+pub mod msgpack;
 
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
