@@ -1,9 +1,9 @@
 # Driving koikatsu-dedupe headlessly (for AI agents)
 
 This tool has a headless CLI, **`kdedupe`**, that shares the same `dedupe.sqlite`
-index as the GUI. Use it to scan, list duplicate groups, and delete — no GUI, no
-clicking. JSON goes to **stdout**, progress/errors to **stderr**, exit code `0`
-on success, `1` on error, `2` on usage mistakes.
+index as the GUI. Use it to scan, list duplicate groups, delete, and sort cards into
+per-game folders — no GUI, no clicking. JSON goes to **stdout**, progress/errors to
+**stderr**, exit code `0` on success, `1` on error, `2` on usage mistakes.
 
 Binary location: next to the GUI exe in a release, or `src-tauri/target/release/kdedupe.exe`
 after `cargo build --release`.
@@ -44,10 +44,39 @@ keep exactly one file (e.g. the newest by `mtime`, or by a naming rule) and pass
 `path` from `groups` when you scanned with `--recursive`, so cards sharing a basename
 across subfolders delete the right one.
 
+## Sorting cards into game folders
+
+```sh
+kdedupe organize --root "D:\dl" --recursive        # DRY-RUN: {root,moves,skipped,unrecognized,unreadable,...}
+kdedupe organize --root "D:\dl" --recursive --apply # actually MOVES the cards
+```
+
+Each card carries the game and character data appended after the PNG, so `organize`
+files it under `[Game]/[Male|Female]` (`[Game]/Coordinate` for outfit cards) inside
+`--root`. Read `moves` before applying: `collision` on each entry says `None` (free
+name), `AlreadyFiled` (identical bytes already there — not moved), `Renamed` (same
+name, different card — filed as `name (2).png`), or `Unresolvable` (no free name
+found; reported as an error, never moved). Cards already in one of those folders are
+listed in `skipped`; anything unparseable is listed in `unrecognized` / `unreadable`
+rather than dropped.
+
+- `--root` is **mandatory** here — unlike `scan`/`count`/`delete` it does *not* fall
+  back to the GUI's saved root, because `--apply` moves files. Both outputs echo the
+  `root` they used; check it.
+- `--game-root "D:\Koikatsu"` additionally reports Sunshine cards whose personality
+  that install cannot voice after conversion (`voice_incompatible`). `voice_ok:false`
+  means the install could not be scanned at all, so no voice claim was made.
+- With `--game-root`, a path can appear in **both** `skipped` and
+  `unreadable`/`unrecognized`: already-filed cards are voice-checked too, so a read
+  failure is reported without cancelling the skip.
+
 ## Rules
 
 - **Always dry-run first.** Run `delete` without `--apply`, confirm `would_delete` is
-  what you intend, then re-run with `--apply`.
+  what you intend, then re-run with `--apply`. Same for `organize`: confirm `moves`
+  and the echoed `root`.
 - Never delete every file in a group — keep one.
 - Deletes go to the Recycle Bin on local drives (recoverable); on a network share the
   NAS's own versioning is the safety net.
+- `organize --apply` is a **move**, not a delete: nothing goes to the Recycle Bin and
+  there is no undo. The dry-run is the only safety net, so read it.

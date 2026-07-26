@@ -190,6 +190,17 @@ fn cli_organize_dry_run_then_apply() {
         output.contains("BOTH skipped and unreadable"),
         "describe must warn that the buckets overlap under --game-root, got: {output}"
     );
+
+    // The manifest's workflow advice covered only the dedup path, so an agent
+    // reading it had no organize procedure and no warning that --apply here is
+    // a move with no Recycle Bin behind it.
+    let wf = ds["safe_workflow_organize"].as_array().expect("safe_workflow_organize");
+    assert!(
+        wf.iter().any(|s| s.as_str().unwrap().contains("--apply")),
+        "the organize workflow must end at --apply, got {wf:?}"
+    );
+    let note = ds["organize_is_a_move"].as_str().expect("organize_is_a_move");
+    assert!(note.contains("Recycle Bin"), "the move must be contrasted with delete, got: {note}");
 }
 
 /// `organize` must NOT inherit the saved-config root fallback. It is the first

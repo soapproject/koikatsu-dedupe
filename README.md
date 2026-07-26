@@ -58,9 +58,21 @@ kdedupe scan   --root "D:\cards" --mode byte      # scan + hash
 kdedupe groups --mode byte                         # duplicate groups (JSON)
 kdedupe delete --root "D:\cards" NAME...           # DRY-RUN (deletes nothing)
 kdedupe delete --root "D:\cards" --apply NAME...   # delete -> Recycle Bin
+kdedupe organize --root "D:\cards" --recursive     # DRY-RUN: where each card would go
+kdedupe organize --root "D:\cards" --apply         # MOVE cards into [Game]/[Male|Female]
 ```
 
 `delete` is dry-run unless `--apply` is given; `--db` defaults to the GUI's library.
+
+`organize` sorts cards by the game and character data appended to each PNG, into
+`[Game]/[Male|Female]` folders (`[Game]/Coordinate` for outfit cards) under `--root`.
+Cards already sitting in one of those folders are left alone, a name collision with
+identical content is reported instead of filed twice, and anything the parser cannot
+read is listed rather than silently skipped. `--game-root "D:\Koikatsu"` additionally
+flags Sunshine cards whose personality that install cannot voice after conversion.
+It is dry-run unless `--apply` is given — and unlike `delete`, `--apply` **moves**
+files: there is no Recycle Bin step and no undo, so `--root` must always be spelled
+out (it never falls back to the GUI's saved root) and is echoed back in the output.
 
 ## Build
 

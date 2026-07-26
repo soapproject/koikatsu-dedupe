@@ -53,7 +53,10 @@ COMMANDS:
 when the flag is omitted; run `config` to see what got resolved. `organize` is the
 exception: it always needs an explicit --root, since --apply moves files.
 Defaults if unset: --mode byte; --db = %APPDATA%/io.github.soapproject.koikatsu-dedupe/dedupe.sqlite
-delete is dry-run by default; --apply sends files to the Recycle Bin (recoverable).";
+delete is dry-run by default; --apply sends files to the Recycle Bin (recoverable).
+organize is dry-run by default too, but its --apply MOVES the cards into
+[Game]/[Male|Female] under --root: no Recycle Bin, no undo. Read the dry-run's
+moves list first, and check the root it echoes back is the tree you meant.";
 
 fn parse(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
     let mut pos = Vec::new();
@@ -127,6 +130,8 @@ fn describe(db: &Path) -> Value {
         "config_fallback": "--root/--db/--mode default to app_data_dir/config.json (GUI's last-used); run `config` to inspect. EXCEPTION: `organize` never falls back — it requires an explicit --root, because --apply moves files and a forgotten --root would reorganize the GUI's last-used library",
         "modes": ["byte", "char"],
         "safe_workflow": ["scan", "groups", "(agent picks names to delete, keeping 1 per group)", "delete (dry-run)", "delete --apply"],
+        "safe_workflow_organize": ["organize --root DIR (dry-run)", "(agent reviews moves/unrecognized/unreadable)", "organize --root DIR --apply"],
+        "organize_is_a_move": "organize --apply MOVES files into [Game]/[Male|Female] under --root. Unlike delete --apply there is no Recycle Bin step and no undo — only the dry-run stands between a wrong --root and a reorganized tree, so --root is always required and is echoed back in the output",
         "commands": [
             {"name":"scan","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"},{"name":"--full","type":"bool"},{"name":"--recursive","type":"bool"}],"output":"{total,groups,dup_files,new,pruned}"},
             {"name":"groups","args":[{"name":"--db","type":"path"},{"name":"--mode","type":"byte|char","default":"byte"},{"name":"--limit","type":"int"}],"output":"[{hash,files:[{name,path,size,mtime}]}]"},
