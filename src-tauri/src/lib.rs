@@ -1,3 +1,4 @@
+pub mod card;
 pub mod core;
 pub mod msgpack;
 
