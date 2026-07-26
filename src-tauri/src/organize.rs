@@ -357,6 +357,12 @@ fn existing_case_insensitive(dir: &Path, name: &str) -> Result<Option<PathBuf>, 
 struct Claim {
     dest: PathBuf,
     source: PathBuf,
+    /// Byte length of `source`, captured once when the claim was made, so the
+    /// content check below can prefilter without a syscall per claim. `None`
+    /// when the length could not be read; such a claim simply never prefilters
+    /// as a match, which costs a redundant suffix at worst and can never merge
+    /// two different cards.
+    len: Option<u64>,
 }
 
 /// Folds a destination name to the key two claims collide on. Must agree with
@@ -407,17 +413,28 @@ fn suffixed(
 /// Card packs routinely name every file `card.png`, and identical cards across
 /// packs are the norm, so this is the common case, not a corner one.
 ///
-/// Prefiltered on `metadata().len()` (usually zero or one candidate), so the
-/// byte comparison is not run per claim. The smallest destination path wins
-/// among equals purely so the answer does not depend on hash iteration order.
-fn claim_with_identical_content(claims: &HashMap<String, Claim>, source: &Path) -> Option<PathBuf> {
-    let len = fs::metadata(source).ok()?.len();
+/// Touches no disk of its own. Claims accumulate one per card filed into a
+/// directory, so `Koikatu/Female` in a six-figure collection holds a six-figure
+/// claim map and any per-claim syscall here would be multiplied by every
+/// collision — on a network destination, one round trip each. The prefilter
+/// therefore reads `Claim::len`, cached at insertion time, and the byte
+/// comparison runs only for the (normally zero or one) length matches.
+///
+/// Stops at the first content match rather than scanning on: a claim is only
+/// ever created for content not already claimed in this directory, so at most
+/// one claim can match, and short-circuiting keeps `same_bytes` — which
+/// re-reads the incoming card each call — from running more than once.
+fn claim_with_identical_content(
+    claims: &HashMap<String, Claim>,
+    source: &Path,
+    source_len: Option<u64>,
+) -> Option<PathBuf> {
+    let len = source_len?;
     claims
         .values()
-        .filter(|c| fs::metadata(&c.source).map(|m| m.len() == len).unwrap_or(false))
-        .filter(|c| same_bytes(source, &c.source))
+        .filter(|c| c.len == Some(len))
+        .find(|c| same_bytes(source, &c.source))
         .map(|c| c.dest.clone())
-        .min()
 }
 
 /// Resolves where `source` (named `name`, destined for `dir`) should land,
@@ -440,11 +457,18 @@ fn resolve_collision(
         Some(c) => Some((c.dest.clone(), c.source.clone())),
         None => existing_case_insensitive(dir, name_s)?.map(|p| (p.clone(), p)),
     };
+    // One stat per card resolved — read here so it can be both cached on any
+    // claim this call creates and used to prefilter the content check, instead
+    // of being paid per claim on every collision.
+    let source_len = fs::metadata(source).map(|m| m.len()).ok();
 
     match occupant {
         None => {
             let dest = dir.join(name_s);
-            claims.insert(key, Claim { dest: dest.clone(), source: source.to_path_buf() });
+            claims.insert(
+                key,
+                Claim { dest: dest.clone(), source: source.to_path_buf(), len: source_len },
+            );
             Ok((dest, Collision::None))
         }
         Some((dest, content_ref)) if same_bytes(source, &content_ref) => {
@@ -454,7 +478,7 @@ fn resolve_collision(
             // The occupant of the plain name differs — but this content may
             // still be spoken for in this directory under a SUFFIXED name, and
             // suffixing again would file the same bytes twice.
-            if let Some(dest) = claim_with_identical_content(claims, source) {
+            if let Some(dest) = claim_with_identical_content(claims, source, source_len) {
                 return Ok((dest, Collision::AlreadyFiled));
             }
             match suffixed(dir, name_s, claims)? {
@@ -463,6 +487,7 @@ fn resolve_collision(
                     claims.insert(claim_key(&cand_name), Claim {
                         dest: dest.clone(),
                         source: source.to_path_buf(),
+                        len: source_len,
                     });
                     Ok((dest, Collision::Renamed))
                 }
@@ -709,6 +734,54 @@ mod tests {
         assert_eq!(claim_key("C.PNG"), claim_key("c.png"));
     }
 
+    /// The content check must prefilter on the length CACHED on each claim,
+    /// never on a fresh `metadata()` call per claim: claims accumulate one per
+    /// card filed into a directory, so a six-figure collection would multiply
+    /// any per-claim syscall by every collision, each one a network round trip
+    /// to the destination share. Pinned by making the cached length disagree
+    /// with the file on disk — a fresh stat would match and return the claim,
+    /// the cache cannot.
+    #[test]
+    fn the_content_check_reads_the_cached_length_not_the_disk() {
+        let dir = std::env::temp_dir().join("kdedupe_claim_len_cache");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let incoming = dir.join("incoming.png");
+        let claimed = dir.join("claimed.png");
+        fs::write(&incoming, b"identical-card-bytes").unwrap();
+        fs::write(&claimed, b"identical-card-bytes").unwrap();
+        let real_len = fs::metadata(&incoming).unwrap().len();
+        let dest = dir.join("c (2).png");
+
+        let claim = |len: Option<u64>| {
+            let mut m: HashMap<String, Claim> = HashMap::new();
+            m.insert(
+                claim_key("c (2).png"),
+                Claim { dest: dest.clone(), source: claimed.clone(), len },
+            );
+            m
+        };
+
+        // Cached length agrees with reality: identical bytes are found.
+        assert_eq!(
+            claim_with_identical_content(&claim(Some(real_len)), &incoming, Some(real_len)),
+            Some(dest.clone())
+        );
+        // Cached length disagrees: the prefilter rejects it, proving the cache
+        // is what was consulted and no per-claim stat happened.
+        assert_eq!(
+            claim_with_identical_content(&claim(Some(real_len + 1)), &incoming, Some(real_len)),
+            None
+        );
+        // A claim whose length could not be read never prefilters as a match.
+        assert_eq!(
+            claim_with_identical_content(&claim(None), &incoming, Some(real_len)),
+            None
+        );
+        // Nor does an incoming card whose own length is unknown.
+        assert_eq!(claim_with_identical_content(&claim(Some(real_len)), &incoming, None), None);
+    }
+
     /// If every `name (N)` slot up to the search cap is already claimed,
     /// `suffixed` must report exhaustion rather than falling back to the
     /// original colliding name (which is exactly the overwrite it exists to
@@ -722,6 +795,7 @@ mod tests {
             claims.insert(claim_key(&format!("c ({n}).png")), Claim {
                 dest: PathBuf::new(),
                 source: PathBuf::new(),
+                len: None,
             });
         }
         let result = suffixed(&dir, "c.png", &claims).unwrap();
@@ -740,11 +814,13 @@ mod tests {
         claims.insert(claim_key("c.png"), Claim {
             dest: dir.join("c.png"),
             source: PathBuf::from("nonexistent-existing-content"),
+            len: None,
         });
         for n in 2..10_000 {
             claims.insert(claim_key(&format!("c ({n}).png")), Claim {
                 dest: PathBuf::new(),
                 source: PathBuf::new(),
+                len: None,
             });
         }
         let source = PathBuf::from("nonexistent-incoming-content");

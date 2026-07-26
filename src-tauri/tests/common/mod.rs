@@ -16,9 +16,17 @@ pub mod fixture {
         assert!((0..128).contains(&i), "fixture ints stay in positive fixint range");
         vec![i as u8]
     }
-    /// Block table offsets/sizes outgrow the fixint range as soon as a card
-    /// carries more than one block, so they get a width-adaptive writer
-    /// (positive fixint / uint16 / uint32) rather than an assertion.
+    /// Width-adaptive writer for block-table offsets and sizes — the one
+    /// fixture field whose value is derived rather than chosen, since it grows
+    /// with the card's own contents. An `mp_int`-style "must be < 128"
+    /// assertion would turn a longer character name into a fixture panic.
+    ///
+    /// Coverage, stated honestly: with today's fixture every offset and size
+    /// fits in a positive fixint (largest offset 82, largest size 66), so the
+    /// `0xCD` / `0xCE` branches are NOT reached and this helper exercises no
+    /// wide-integer path in the decoder — `msgpack.rs`'s own `wide_types_decode`
+    /// is what covers those. The branches stay so a future fixture that does
+    /// outgrow the range keeps working rather than panicking.
     pub fn mp_uint(n: u64) -> Vec<u8> {
         if n < 128 {
             vec![n as u8]
