@@ -41,7 +41,9 @@
 | `src-tauri/src/organize.rs` **(建立)** | 分類決策（含排除規則）、性格相容性、規劃與套用、撞名處理。 |
 | `src-tauri/src/lib.rs` **(修改 :1)** | 加 `pub mod msgpack; pub mod card; pub mod organize;` |
 | `src-tauri/src/cli.rs` **(修改)** | 加三個 `#[path]` mod 宣告、`organize` 子命令、USAGE、`describe` 條目、`plan` 進 `BOOL_FLAGS`。 |
-| `src-tauri/tests/organize.rs` **(建立)** | 8 條回歸測試，用自建合成卡片，完全 hermetic。 |
+| `src-tauri/tests/common/mod.rs` **(建立)** | 測試共用的卡片合成器（`tests/common/` 不會被當成測試目標，故三個測試檔可共用而**不會有任何測試碼進入發佈的 lib**）。 |
+| `src-tauri/tests/card.rs` **(建立)** | `card.rs` 的解析測試。 |
+| `src-tauri/tests/organize.rs` **(建立)** | 回歸測試，用自建合成卡片，完全 hermetic。 |
 | `src-tauri/tests/cli.rs` **(修改)** | 加 `organize` 的 CLI 端到端測試（dry-run 不動檔案）。 |
 
 ---
@@ -314,7 +316,13 @@ not guaranteed valid UTF-8."
 
 **Files:**
 - Create: `src-tauri/src/card.rs`
+- Create: `src-tauri/tests/common/mod.rs`
+- Create: `src-tauri/tests/card.rs`
 - Modify: `src-tauri/src/lib.rs`（加 `pub mod card;`）
+
+**測試放在整合測試而非模組內 `#[cfg(test)]`**：合成卡片的輔助程式碼要被 `tests/card.rs`、
+`tests/organize.rs`、`tests/cli.rs` 三個測試 crate 共用。`tests/common/` 這個子目錄不會被
+Cargo 當成測試目標，是共用測試輔助的慣用位置——這樣**沒有任何測試專用程式碼進入發佈的 lib**。
 
 **Interfaces:**
 - Consumes: `crate::core::png_char_block(&Path) -> Option<(u64, u64)>`、`crate::msgpack::{decode, Value}`
@@ -330,17 +338,15 @@ not guaranteed valid UTF-8."
 
 - [ ] **Step 1: 寫失敗測試**
 
-建立 `src-tauri/src/card.rs`，先只放測試與合成卡片輔助函式：
+建立 `src-tauri/tests/common/mod.rs`：
 
 ```rust
-//! Structured Koikatsu card metadata: marker -> (game, card type), and the
-//! Parameter block's sex / name / personality. Starts from the offset
-//! core::png_char_block() already computes by walking the PNG chunk chain.
+//! Synthesises byte-exact Koikatsu cards so the test suite needs no
+//! local-only fixtures. Lives under tests/common/ — not a test target
+//! itself — so no test-only code ends up in the shipped library.
+#![allow(dead_code)] // each test crate uses a different subset
 
-#[cfg(test)]
 pub mod fixture {
-    //! Synthesises byte-exact cards so tests need no local-only fixtures.
-
     /// MessagePack fixstr / fixmap / fixarray writers (test-only encoder).
     pub fn mp_str(s: &str) -> Vec<u8> {
         let b = s.as_bytes();
@@ -429,10 +435,18 @@ pub mod fixture {
     }
 }
 
-#[cfg(test)]
+```
+
+建立 `src-tauri/tests/card.rs`：
+
+```rust
+//! Parser tests for card.rs, driven by synthesised cards from tests/common.
+
+mod common;
+
 mod tests {
-    use super::fixture::*;
-    use super::*;
+    use crate::common::fixture::*;
+    use app_lib::card::*;
 
     fn write(name: &str, bytes: &[u8]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join("kdedupe_card_tests");
@@ -500,14 +514,18 @@ mod tests {
 
 - [ ] **Step 2: 跑測試確認失敗**
 
-Run: `cd src-tauri && cargo test --lib card`
-Expected: 編譯失敗，`cannot find function read_card` / `cannot find type CardError`。
+Run: `cd src-tauri && cargo test --test card`
+Expected: 編譯失敗，`unresolved import app_lib::card`（`src/card.rs` 尚未建立）。
 
 - [ ] **Step 3: 寫最小實作**
 
-在 `card.rs` 的 `#[cfg(test)]` 區塊**之前**插入：
+建立 `src-tauri/src/card.rs`，內容為：
 
 ```rust
+//! Structured Koikatsu card metadata: marker -> (game, card type), and the
+//! Parameter block's sex / name / personality. Starts from the offset
+//! core::png_char_block() already computes by walking the PNG chunk chain.
+
 use crate::msgpack::{decode, Value};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -755,7 +773,7 @@ pub fn read_card(path: &Path) -> Result<CardMeta, CardError> {
 
 - [ ] **Step 4: 跑測試確認通過**
 
-Run: `cd src-tauri && cargo test --lib card`
+Run: `cd src-tauri && cargo test --test card`
 Expected: 6 個測試 PASS。
 
 Run: `cd src-tauri && cargo test`
@@ -764,7 +782,7 @@ Expected: 既有測試全部仍 PASS（`round.rs`、`cli.rs` 在缺夾具時自�
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src-tauri/src/card.rs src-tauri/src/lib.rs
+git add src-tauri/src/card.rs src-tauri/src/lib.rs src-tauri/tests/card.rs src-tauri/tests/common/mod.rs
 git commit -m "feat(card): structured card metadata (marker, sex, name, personality)
 
 Completes the upgrade path core.rs has recorded since the strings-based
@@ -802,8 +820,10 @@ and names decode lossily because they are not guaranteed valid UTF-8."
 //! Regression tests for the card organize module. Every card is synthesised in
 //! the test, so these run anywhere — no local-only fixtures involved.
 
-use app_lib::card::fixture::card;
+mod common;
+
 use app_lib::organize;
+use common::fixture::card;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1055,23 +1075,8 @@ pub fn plan(root: &Path, recursive: bool) -> Plan {
 }
 ```
 
-在 `src-tauri/src/lib.rs` 加 `pub mod organize;`。
-
-`card.rs` 的 `fixture` 模組目前是 `#[cfg(test)]`，整合測試看不到——把它改成永遠編譯但標註為測試輔助：
-
-將 `card.rs` 中的
-
-```rust
-#[cfg(test)]
-pub mod fixture {
-```
-
-改為
-
-```rust
-/// Test-only card synthesis, compiled into the lib so integration tests can use it.
-pub mod fixture {
-```
+在 `src-tauri/src/lib.rs` 加 `pub mod organize;`。（合成器已在 Task 2 建立於
+`tests/common/mod.rs`，本 Task 只需 `mod common;` 引用，`src/` 底下不需任何改動。）
 
 - [ ] **Step 4: 跑測試確認通過**
 
@@ -1541,11 +1546,10 @@ fn cli_organize_dry_run_then_apply() {
     assert!(names.contains(&"organize"), "describe must list organize, got {names:?}");
 }
 
-/// Integration tests link the lib crate, so the same synthesiser the organize
-/// tests use is available here — the CLI test drives the built binary but can
-/// still build its input from `app_lib`.
+/// Same synthesiser the other test crates use — the CLI test drives the built
+/// binary but still builds its input in-process.
 fn app_lib_card_fixture() -> Vec<u8> {
-    app_lib::card::fixture::card("【KoiKatuChara】", 1, "東山", "涼子", Some(19))
+    common::fixture::card("【KoiKatuChara】", 1, "東山", "涼子", Some(19))
 }
 ```
 
@@ -1630,7 +1634,7 @@ mod organize;
         }
 ```
 
-`tests/cli.rs` 需要 `app_lib`：在該檔頂端的 `use` 之後不需改動（整合測試預設可用 `app_lib`，因為 lib crate 名為 `app_lib`）。
+`tests/cli.rs` 需要用到共用合成器：在該檔頂端（`use serde_json::Value;` 之前）加一行 `mod common;`。
 
 - [ ] **Step 4: 跑測試確認通過**
 
