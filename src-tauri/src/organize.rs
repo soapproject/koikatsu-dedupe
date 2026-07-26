@@ -395,6 +395,29 @@ fn suffixed(
     Ok(None)
 }
 
+/// Whether this exact content is ALREADY claimed somewhere in `dir` — under
+/// any name, including a suffixed one. Without this, three same-named cards
+/// bound for one directory file two identical copies: the first takes `c.png`,
+/// the second differs and takes `c (2).png`, and the third — byte-identical to
+/// the second — is only ever compared against the FIRST, so it differs too and
+/// takes `c (3).png`. That manufactures exactly the duplicate the collision
+/// rule exists to prevent, in an app whose whole purpose is removing them.
+/// Card packs routinely name every file `card.png`, and identical cards across
+/// packs are the norm, so this is the common case, not a corner one.
+///
+/// Prefiltered on `metadata().len()` (usually zero or one candidate), so the
+/// byte comparison is not run per claim. The smallest destination path wins
+/// among equals purely so the answer does not depend on hash iteration order.
+fn claim_with_identical_content(claims: &HashMap<String, Claim>, source: &Path) -> Option<PathBuf> {
+    let len = fs::metadata(source).ok()?.len();
+    claims
+        .values()
+        .filter(|c| fs::metadata(&c.source).map(|m| m.len() == len).unwrap_or(false))
+        .filter(|c| same_bytes(source, &c.source))
+        .map(|c| c.dest.clone())
+        .min()
+}
+
 /// Resolves where `source` (named `name`, destined for `dir`) should land,
 /// checking both the live filesystem AND every name already claimed earlier
 /// in this same `plan()` pass — otherwise two incoming files that map to the
@@ -425,17 +448,25 @@ fn resolve_collision(
         Some((dest, content_ref)) if same_bytes(source, &content_ref) => {
             Ok((dest, Collision::AlreadyFiled))
         }
-        Some(_) => match suffixed(dir, name_s, claims)? {
-            Some(dest) => {
-                let cand_name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                claims.insert(claim_key(&cand_name), Claim {
-                    dest: dest.clone(),
-                    source: source.to_path_buf(),
-                });
-                Ok((dest, Collision::Renamed))
+        Some(_) => {
+            // The occupant of the plain name differs — but this content may
+            // still be spoken for in this directory under a SUFFIXED name, and
+            // suffixing again would file the same bytes twice.
+            if let Some(dest) = claim_with_identical_content(claims, source) {
+                return Ok((dest, Collision::AlreadyFiled));
             }
-            None => Ok((dir.join(name_s), Collision::Unresolvable)),
-        },
+            match suffixed(dir, name_s, claims)? {
+                Some(dest) => {
+                    let cand_name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    claims.insert(claim_key(&cand_name), Claim {
+                        dest: dest.clone(),
+                        source: source.to_path_buf(),
+                    });
+                    Ok((dest, Collision::Renamed))
+                }
+                None => Ok((dir.join(name_s), Collision::Unresolvable)),
+            }
+        }
     }
 }
 

@@ -262,6 +262,47 @@ fn apply_reports_unresolvable_as_an_error_without_touching_the_filesystem() {
     assert!(!to.exists(), "nothing must be written for an unresolvable collision");
 }
 
+/// Content already claimed under a SUFFIXED name must not be filed again.
+/// Three same-named cards bound for one directory: the first takes `c.png`,
+/// the second differs and takes `c (2).png`, and the third is byte-identical
+/// to the second. Comparing it only against the first (which it differs from)
+/// sends it to `c (3).png` — two identical files, manufactured by the very
+/// rule that exists to prevent duplicates. Card packs name every file
+/// `card.png` and identical cards across packs are the norm, so this chain is
+/// the common case.
+#[test]
+fn identical_content_already_claimed_under_a_suffix_is_not_filed_a_second_time() {
+    let root = fresh("suffix_same_content");
+    let x = kk_female();
+    let y = card("【KoiKatuChara】", 1, "別", "人", Some(2));
+    assert_ne!(x, y, "the fixture must actually differ");
+    let a = put(&root, "A/c.png", &x);
+    let b = put(&root, "B/c.png", &y);
+    let c = put(&root, "C/c.png", &y); // byte-identical to B
+
+    let p = organize::plan(&root, true, None);
+    assert_eq!(p.moves.len(), 3, "{p:?}");
+    assert!(matches!(p.moves[0].collision, organize::Collision::None), "{p:?}");
+    assert!(matches!(p.moves[1].collision, organize::Collision::Renamed), "{p:?}");
+    assert!(
+        matches!(p.moves[2].collision, organize::Collision::AlreadyFiled),
+        "content already claimed under a suffix must read as AlreadyFiled: {p:?}"
+    );
+    assert_eq!(p.moves[2].to, p.moves[1].to, "it is the same content, so the same destination");
+
+    let r = organize::apply(&p);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert_eq!((r.moved, r.renamed, r.already_filed), (1, 1, 1));
+    assert_eq!(fs::read(root.join("Koikatu/Female/c.png")).unwrap(), x);
+    assert_eq!(fs::read(root.join("Koikatu/Female/c (2).png")).unwrap(), y);
+    assert!(
+        !root.join("Koikatu/Female/c (3).png").exists(),
+        "identical bytes must not be filed twice under two suffixes"
+    );
+    assert!(!a.exists() && !b.exists(), "both distinct cards moved");
+    assert!(c.exists(), "the already-filed duplicate's source is untouched");
+}
+
 /// A destination directory that cannot be LISTED (a dropped network share, an
 /// ACL that denies list while permitting write — reproduced portably here by a
 /// file sitting where the directory should be) leaves the collision status
