@@ -178,6 +178,57 @@ fn cli_organize_dry_run_then_apply() {
     assert!(names.contains(&"organize"), "describe must list organize, got {names:?}");
 }
 
+/// `organize` must NOT inherit the saved-config root fallback. It is the first
+/// mutating command whose only required argument could come from config, so a
+/// forgotten --root would bulk-move the GUI's last-used library — for this
+/// user, a 161,963-card collection. The read-only commands keep the fallback:
+/// that behaviour is unchanged, and the control assertion here proves it.
+#[test]
+fn cli_organize_requires_an_explicit_root_while_count_still_falls_back() {
+    let tmp = env::temp_dir().join("kdedupe_organize_needs_root");
+    let _ = fs::remove_dir_all(&tmp);
+    let saved_root = tmp.join("saved_library");
+    fs::create_dir_all(&saved_root).unwrap();
+    let cfg = tmp.join("config.json");
+    fs::write(
+        &cfg,
+        format!(
+            r#"{{"root":{},"mode":"byte"}}"#,
+            serde_json::to_string(saved_root.to_str().unwrap()).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_kdedupe"))
+            .args(args)
+            .env("KDEDUPE_CONFIG", &cfg)
+            .output()
+            .expect("run kdedupe")
+    };
+
+    let o = run(&["organize"]);
+    assert_eq!(o.status.code(), Some(2), "organize without --root must be a usage error");
+    assert!(
+        String::from_utf8_lossy(&o.stderr).contains("--root"),
+        "the error must name the missing flag, got: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let o2 = run(&["organize", "--apply"]);
+    assert_eq!(o2.status.code(), Some(2), "--apply must not bypass the requirement either");
+
+    // Control: an existing read-only command still resolves root from config.
+    let c = run(&["count"]);
+    assert_eq!(c.status.code(), Some(0), "count must still fall back to the saved root");
+
+    // The resolved root is echoed, so the tree operated on is visible.
+    let root_s = saved_root.to_str().unwrap();
+    let d = json(&["organize", "--root", root_s]);
+    assert_eq!(d["root"], root_s, "dry-run must echo the resolved root");
+    let a = json(&["organize", "--root", root_s, "--apply"]);
+    assert_eq!(a["root"], root_s, "--apply must echo the resolved root too");
+}
+
 /// Same synthesiser the other test crates use — the CLI test drives the built
 /// binary but still builds its input in-process.
 fn app_lib_card_fixture() -> Vec<u8> {

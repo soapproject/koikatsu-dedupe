@@ -50,7 +50,8 @@ COMMANDS:
   --help | --version
 
 --root/--db/--mode default to the GUI's last-used values (app_data_dir/config.json)
-when the flag is omitted; run `config` to see what got resolved.
+when the flag is omitted; run `config` to see what got resolved. `organize` is the
+exception: it always needs an explicit --root, since --apply moves files.
 Defaults if unset: --mode byte; --db = %APPDATA%/io.github.soapproject.koikatsu-dedupe/dedupe.sqlite
 delete is dry-run by default; --apply sends files to the Recycle Bin (recoverable).";
 
@@ -123,7 +124,7 @@ fn describe(db: &Path) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "summary": "Headless Koikatsu card deduplicator. Shares dedupe.sqlite with the GUI.",
         "default_db": db.to_string_lossy(),
-        "config_fallback": "--root/--db/--mode default to app_data_dir/config.json (GUI's last-used); run `config` to inspect",
+        "config_fallback": "--root/--db/--mode default to app_data_dir/config.json (GUI's last-used); run `config` to inspect. EXCEPTION: `organize` never falls back — it requires an explicit --root, because --apply moves files and a forgotten --root would reorganize the GUI's last-used library",
         "modes": ["byte", "char"],
         "safe_workflow": ["scan", "groups", "(agent picks names to delete, keeping 1 per group)", "delete (dry-run)", "delete --apply"],
         "commands": [
@@ -133,7 +134,7 @@ fn describe(db: &Path) -> Value {
             {"name":"strings","args":[{"name":"--path","required":true,"type":"png"}],"output":"[string]"},
             {"name":"count","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"}],"output":"int"},
             {"name":"delete","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--db","type":"path"},{"name":"NAME...","required":true,"type":"filename[]"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,would_delete,count}; --apply: {deleted,freed,errors}"},
-            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,moves,skipped,unrecognized,unreadable,voice_incompatible,voice_source,voice_ok,hint}; --apply: {moved,already_filed,renamed,errors}"},
+            {"name":"organize","args":[{"name":"--root","required":true,"type":"dir"},{"name":"--recursive","type":"bool"},{"name":"--game-root","type":"dir"},{"name":"--apply","type":"bool"}],"output":"dry-run: {dry_run,root,moves,skipped,unrecognized,unreadable,voice_incompatible,voice_source,voice_ok,hint}; --apply: {root,moved,already_filed,renamed,errors}"},
             {"name":"config","args":[],"output":"{config_file,saved,resolved:{root,db,mode}}"}
         ]
     })
@@ -264,9 +265,23 @@ pub fn run(argv: &[String]) -> i32 {
             }
         }
         "organize" => {
-            let root = match need_root("organize") {
-                Ok(r) => r,
-                Err(c) => return c,
+            // organize does NOT inherit the saved-config root fallback that
+            // scan/count/delete use. scan and count are read-only, and delete
+            // still needs explicit NAME arguments; organize is the first
+            // MUTATING command whose only required argument would otherwise
+            // have an implicit default, so a forgotten --root would bulk-move
+            // whichever library the GUI last touched. Nothing is deleted, but
+            // unwinding a six-figure card collection is hours of work.
+            let root = match flags.get("root").filter(|s| !s.is_empty()) {
+                Some(r) => PathBuf::from(r),
+                None => {
+                    eprintln!(
+                        "error: organize needs an explicit --root DIR.\n\
+                         Unlike scan/count/delete it deliberately does NOT fall back to the GUI's saved root:\n\
+                         --apply MOVES files, so a forgotten --root would reorganize the last library the GUI used."
+                    );
+                    return 2;
+                }
             };
             let recursive = flags.contains_key("recursive");
             let support = flags.get("game-root").map(|g| organize::voice_support(Path::new(g)));
@@ -274,6 +289,10 @@ pub fn run(argv: &[String]) -> i32 {
             if flags.contains_key("apply") {
                 let r = organize::apply(&p);
                 out(json!({
+                    // Echo the tree actually operated on: a move is not
+                    // undoable from here, so the target must be visible in
+                    // the output, not merely implied by the arguments.
+                    "root": root.to_string_lossy(),
                     "moved": r.moved,
                     "already_filed": r.already_filed,
                     "renamed": r.renamed,
@@ -287,6 +306,7 @@ pub fn run(argv: &[String]) -> i32 {
             } else {
                 out(json!({
                     "dry_run": true,
+                    "root": root.to_string_lossy(),
                     "moves": p.moves,
                     "skipped": p.skipped,
                     "unrecognized": p.unrecognized,
