@@ -14,6 +14,8 @@ target/
 
 # editor / tooling / caches
 /.claude/
+# visual-companion brainstorm scratch (mockups persist here; not the docs/ specs)
+/.superpowers/
 __pycache__/
 *.pyc
 .DS_Store
